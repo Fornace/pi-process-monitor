@@ -1,7 +1,7 @@
 {
   "name": "pi-process-monitor",
-  "version": "1.0.0",
-  "description": "Non-blocking background watcher for pi (by Fornace) — start a process, SSH poll, or log tail and get pinged in-session the moment a milestone hits, a failure occurs, or the process dies. The pi equivalent of Claude Code's Monitor tool, with conditional delivery (no per-line LLM turns).",
+  "version": "1.1.0",
+  "description": "Non-blocking background watcher for pi — start a process, SSH poll, or log tail and get pinged in-session on milestones, failure, or exit. Claude Code's Monitor tool, with conditional delivery.",
   "type": "module",
   "license": "MIT",
   "author": "Francesco Frapporti <effedue@gmail.com>",
@@ -33,6 +33,7 @@
     "extensions",
     "skills",
     "prompts",
+    "docs/preview.png",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -40,7 +41,8 @@
   "pi": {
     "extensions": ["./extensions"],
     "skills": ["./skills"],
-    "prompts": ["./prompts"]
+    "prompts": ["./prompts"],
+    "image": "https://github.com/Fornace/pi-process-monitor/raw/refs/heads/main/docs/preview.png"
   },
   "scripts": {
     "test": "node test/load.mjs",

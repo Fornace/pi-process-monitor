@@ -1,10 +1,12 @@
-# pi-monitor
+# pi-process-monitor
 
 > Non-blocking background watcher for [pi](https://pi.dev). Start a process, an SSH poll, or a log tail and get **pinged in-session** the moment a milestone hits, a failure occurs, or the process dies — without blocking.
 
 The pi equivalent of Claude Code's `Monitor` tool.
 
-**Why it's better than Claude's naive Monitor:** Claude streams *every* stdout line as an event (= one LLM turn per line: expensive, floods context). `pi-monitor` does **conditional delivery** — only lines matching `notifyOn` (default: milestones + failures), plus process exit, are pushed, and rapid lines are coalesced into one message.
+![pi-process-monitor in action — a non-blocking watcher pinging the session when training milestones hit](docs/preview.png)
+
+**Why it's better than Claude's naive Monitor:** Claude streams *every* stdout line as an event (= one LLM turn per line: expensive, floods context). `pi-process-monitor` does **conditional delivery** — only lines matching `notifyOn` (default: milestones + failures), plus process exit, are pushed, and rapid lines are coalesced into one message.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -141,7 +143,7 @@ Spawn-mode children can't survive (they're children of the pi process and are ki
 
 ```bash
 git clone https://github.com/Fornace/pi-process-monitor
-cd pi-monitor
+cd pi-process-monitor
 npm install      # peer deps
 npm test         # runtime smoke test
 npm run typecheck

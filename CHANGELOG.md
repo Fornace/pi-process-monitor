@@ -1,7 +1,17 @@
 # Changelog
 
-All notable changes to **pi-monitor** are documented here.
+All notable changes to **pi-process-monitor** are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
+
+## [1.1.0] — 2026-06-29
+### Added
+- Gallery preview image (`pi.image`): a realistic terminal screenshot of the
+  extension in action (H100 QLoRA training → milestone/failure pings), 1280×720.
+- `docs/preview.png` (+ `preview@2x.png`) and the HTML source used to render it.
+
+### Changed
+- Tightened the package description so it no longer truncates mid-word in the
+  pi registry card.
 
 ## [1.0.0] — 2026-06-29
 ### Added
@@ -24,4 +34,5 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - `monitor` skill (auto-invoked when the agent detects a long-running job) and
   `/watch` prompt template.
 
+[1.1.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.0.0

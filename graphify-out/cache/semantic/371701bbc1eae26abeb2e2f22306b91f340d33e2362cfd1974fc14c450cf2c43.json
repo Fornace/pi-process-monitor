@@ -1,1 +1,0 @@
-{"nodes": [{"id": "watch_prompt", "label": "/watch prompt", "file_type": "document", "source_file": "prompts/watch.md", "source_location": "L1"}], "edges": [{"source": "watch_prompt", "target": "changelog_monitor_tool", "relation": "references", "confidence": "INFERRED", "confidence_score": 0.9, "source_file": "prompts/watch.md"}], "hyperedges": []}

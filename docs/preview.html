@@ -1,0 +1,118 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  @font-face { font-family: "Menlo"; src: local("Menlo"); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1280px; height:720px; overflow:hidden; }
+  body {
+    font-family: "Menlo", "SF Mono", monospace;
+    font-size: 15px; line-height: 1.5;
+    background: #0d0d0f;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .window {
+    width:1208px; height:688px;
+    background:#1a1a1a; border-radius:10px; overflow:hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px #2a2a2a;
+    display:flex; flex-direction:column;
+  }
+  .titlebar {
+    height:30px; background:#262626; display:flex; align-items:center;
+    padding:0 13px; border-bottom:1px solid #1f1f1f; flex-shrink:0;
+  }
+  .dot { width:12px; height:12px; border-radius:50%; margin-right:8px; }
+  .d1{background:#ff5f57}.d2{background:#febc2e}.d3{background:#28c840}
+  .title { flex:1; text-align:center; color:#7a7a7a; font-size:12px; letter-spacing:.3px; }
+  .body { flex:1; padding:16px 20px; overflow:hidden; color:#d4d4d4; }
+  .row { margin-bottom:9px; }
+  .pad { padding-left:0; }
+
+  /* user message */
+  .u { background:#343541; border-radius:8px; padding:9px 12px; color:#d4d4d4; }
+  .u .p { color:#8abeb7; margin-right:8px; font-weight:700; } /* ❯ accent */
+
+  /* assistant */
+  .a { color:#d4d4d4; padding:2px 2px; }
+  .a .h { color:#f0c674; } /* heading-ish */
+  .muted { color:#808080; }
+  .dim { color:#787878; }
+  .accent { color:#8abeb7; }
+  .green { color:#b5bd68; }
+  .red { color:#cc6666; }
+  .blue { color:#5f87ff; }
+  .purple { color:#9575cd; }
+
+  /* tool row */
+  .tool { background:#283228; border-radius:6px; padding:6px 11px; display:flex; align-items:baseline; }
+  .tool .name { color:#8abeb7; font-weight:700; margin-right:9px; }
+  .tool .arrow { color:#b5bd68; margin-right:7px; }
+  .tool .args { color:#808080; font-size:14px; }
+  .tool .res { color:#b5bd68; }
+
+  /* watcher ping (custom message) */
+  .ping { background:#2d2838; border-radius:6px; padding:6px 11px; color:#d4d4d4; }
+  .ping .lbl { color:#9575cd; font-weight:700; }   /* [watcher id · label] purple */
+  .ping .sep { color:#666666; }
+  .ping .body { color:#d4d4d4; }
+  .ping .ev { color:#8abeb7; }                       /* event line accent */
+
+  /* working indicator + footer */
+  .working { color:#666666; padding:2px 2px; }
+  .working .sp { color:#8abeb7; }
+  .footer { height:24px; border-top:1px solid #232323; display:flex; align-items:center;
+    padding:0 16px; color:#6a6a6a; font-size:12px; gap:14px; flex-shrink:0; background:#161616; }
+  .footer .mdl { color:#8abeb7; }
+  .footer .ctx { color:#666666; }
+  .footer .right { margin-left:auto; }
+  .pill { border:1px solid #333; border-radius:9px; padding:1px 8px; color:#666; }
+</style></head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div>
+    <div class="title">pi — eugeny-qlora · ssh h100</div>
+    <div style="width:60px"></div>
+  </div>
+  <div class="body">
+
+    <div class="row u"><span class="p">❯</span>kick off the full QLoRA run on the H100 and watch it — ping me when the adapter lands or it OOMs. don't block on it.</div>
+
+    <div class="row a">On it. Training is launched on the H100 (seq_len 8192, 3,738 rows). I'll watch it with a non-blocking poller over SSH and keep working — you'll be pinged the moment the adapter saves, loss checkpoints land, or the process dies.</div>
+
+    <div class="row tool">
+      <span class="arrow">▸</span><span class="name">monitor</span>
+      <span class="args"><span class="accent">command</span>=<span class="green">"ssh h100 'tail -n3 train.log; echo ALIVE=$(pgrep -fc axolotl)'"</span> <span class="accent">intervalSeconds</span>=<span class="green">30</span> <span class="accent">label</span>=<span class="green">"h100-qlora"</span> <span class="accent">notifyOn</span>=<span class="muted">["adapter.*saved","step [0-9]{3} ","oom|killed","ALIVE=0"]</span></span>
+    </div>
+    <div class="row tool" style="background:#1f2a1f;">
+      <span class="arrow">✓</span><span class="name" style="visibility:hidden">monitor</span>
+      <span class="res">Watcher <span class="accent">k3n8p2a1x</span> running (mode=<span class="accent">poll</span>). Will ping when: adapter.*saved | step [0-9]{3} | oom|killed | ALIVE=0.</span>
+    </div>
+
+    <div class="row a">Watcher's up. Meanwhile I'll draft the eval harness while it trains. <span class="dim">(≈467 steps, ~1h on H100 — should sail past the step-60 wall that killed every RTX run.)</span></div>
+
+    <div class="row working"><span class="sp">●</span> <span>drafting eval harness…</span> <span class="dim">· watcher k3n8p2a1x polling h100 every 30s</span></div>
+
+    <div class="row dim" style="margin:6px 0 10px;">…~9 minutes later, mid-edit, the session lights up:</div>
+
+    <div class="row ping"><span class="lbl">[watcher k3n8p2a1x · h100-qlora]</span> <span class="sep">→</span> <span class="ev">step 60 loss=0.83 lr=2.9e-4</span> <span class="sep">(cleared the OOM wall)</span></div>
+    <div class="row ping"><span class="lbl">[watcher k3n8p2a1x · h100-qlora]</span> <span class="sep">→</span> <span class="ev">step 200 loss=0.41 lr=1.2e-4</span></div>
+    <div class="row ping"><span class="lbl">[watcher k3n8p2a1x · h100-qlora]</span> <span class="sep">→</span> <span class="green">adapter saved → /root/out/adapter (step 467, loss 0.34)</span></div>
+
+    <div class="row a" style="margin-top:11px;"><span class="accent">Adapter landed.</span> Loss 0.34 at step 467, no OOM — 80GB headroom did the trick. Stopping the H100 now and queuing the eval. You can keep going here; the watcher's torn down.</div>
+
+    <div class="row tool" style="background:#283228;">
+      <span class="arrow">▸</span><span class="name">monitor_kill</span>
+      <span class="args">id=<span class="accent">"k3n8p2a1x"</span></span>
+      <span style="margin-left:auto;color:#b5bd68">✓ Stopped k3n8p2a1x.</span>
+    </div>
+
+  </div>
+  <div class="footer">
+    <span class="mdl">claude-sonnet-4-5</span>
+    <span class="pill">thinking: medium</span>
+    <span class="ctx">ctx 38%</span>
+    <span class="right">watcher torn down · session idle</span>
+    <span class="dim">⌘+↵ send</span>
+  </div>
+</div>
+</body></html>
