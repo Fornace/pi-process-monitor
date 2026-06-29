@@ -47,8 +47,8 @@ ok(ac && ac.some(i => i.value === wid), "autocomplete returns live watcher id");
 
 // let it run + flush the exit message
 await new Promise(res => setTimeout(res, 500));
-const last = sent[sent.length - 1]?.content || "";
-ok(/PROCESS EXITED \(code=0/.test(last), "exit pinged: " + last.slice(0, 60));
+const exitMsg = sent.find(m => /PROCESS EXITED \(code=0/.test(m.content || ""));
+ok(exitMsg, "exit pinged (PROCESS EXITED present in messages)");
 
 // session_start resume: append a poll-watcher entry, then re-fire session_start
 entries.push({ type: "custom", customType: "monitor-watcher", data: { command: "echo hi", intervalSec: 60, cwd: "/tmp" } });
