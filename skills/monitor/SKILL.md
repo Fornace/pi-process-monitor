@@ -3,7 +3,7 @@ name: monitor
 description: Non-blocking background watcher for pi. Start a long-running process (training, dev server, CI), poll a remote SSH command, or tail a log file, and get pinged in-session the moment a milestone hits, a failure occurs, or the process dies — without blocking the session. Use when a job may run minutes-to-hours and you need to keep working while it runs.
 user-invokable: true
 tested_date: 2026-06-29
-tested_with: fornace-pi-monitor 1.0.0, @earendil-works/pi-coding-agent (peer)
+tested_with: pi-process-monitor 1.0.0, @earendil-works/pi-coding-agent (peer)
 ---
 
 # monitor — non-blocking background watcher

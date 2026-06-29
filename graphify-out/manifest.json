@@ -5,9 +5,9 @@
     "semantic_hash": "8fe86897b7e9530964a531f71cf1df64"
   },
   "package.json": {
-    "mtime": 1782731282.733449,
-    "ast_hash": "efb9b527a38b1a4f153756cb2fde0fff",
-    "semantic_hash": "efb9b527a38b1a4f153756cb2fde0fff"
+    "mtime": 1782731724.622576,
+    "ast_hash": "303b258df3c0ff4214df99ac07ce80e2",
+    "semantic_hash": ""
   },
   "test/load.mjs": {
     "mtime": 1782731349.0964687,
@@ -18,5 +18,25 @@
     "mtime": 1782731282.734078,
     "ast_hash": "237727235e2a8d2202f5e26fbc4616b2",
     "semantic_hash": "237727235e2a8d2202f5e26fbc4616b2"
+  },
+  "CHANGELOG.md": {
+    "mtime": 1782731349.0965238,
+    "ast_hash": "0663ef89793528b41dee945872f637a8",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1782731724.622691,
+    "ast_hash": "4e791e685ced349e9b1fe41d1116c38e",
+    "semantic_hash": ""
+  },
+  "prompts/watch.md": {
+    "mtime": 1782731349.0964355,
+    "ast_hash": "6befddd65bb2b2cdc7e47e273fd3dd8f",
+    "semantic_hash": ""
+  },
+  "skills/monitor/SKILL.md": {
+    "mtime": 1782731724.62276,
+    "ast_hash": "d7cd5b4f0d7204bbaa61049d48d7e467",
+    "semantic_hash": ""
   }
 }

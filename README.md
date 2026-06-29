@@ -23,17 +23,17 @@ The pi equivalent of Claude Code's `Monitor` tool.
 ## Install
 
 ```bash
-pi install npm:fornace-pi-monitor@1.0.0      # global (all projects)
-pi install npm:fornace-pi-monitor@1.0.0 -l   # project-local (.pi/settings.json)
+pi install npm:pi-process-monitor@1.0.0      # global (all projects)
+pi install npm:pi-process-monitor@1.0.0 -l   # project-local (.pi/settings.json)
 ```
 
 Or try it once without installing:
 
 ```bash
-pi -e npm:fornace-pi-monitor
+pi -e npm:pi-process-monitor
 ```
 
-> **Note on naming:** the npm package is `fornace-pi-monitor` (the unscoped `pi-monitor` was already taken). If you create a `@fornace` npm org, this package can also be published as `@fornace/pi-monitor` — the GitHub repo is [`Fornace/pi-monitor`](https://github.com/Fornace/pi-monitor) either way.
+> **Naming note:** the bare `pi-monitor` name was already taken on npm, so this publishes as `pi-process-monitor`. The original `fornace-pi-monitor@1.0.0` release is deprecated in favor of this one. GitHub: [`Fornace/pi-process-monitor`](https://github.com/Fornace/pi-process-monitor).
 
 Requires the `@earendil-works/pi-coding-agent` peer (already present in any pi install).
 
@@ -140,7 +140,7 @@ Spawn-mode children can't survive (they're children of the pi process and are ki
 ## Development
 
 ```bash
-git clone https://github.com/Fornace/pi-monitor
+git clone https://github.com/Fornace/pi-process-monitor
 cd pi-monitor
 npm install      # peer deps
 npm test         # runtime smoke test

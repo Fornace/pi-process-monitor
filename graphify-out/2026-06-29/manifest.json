@@ -1,0 +1,22 @@
+{
+  "extensions/monitor.ts": {
+    "mtime": 1782731457.1098504,
+    "ast_hash": "8fe86897b7e9530964a531f71cf1df64",
+    "semantic_hash": "8fe86897b7e9530964a531f71cf1df64"
+  },
+  "package.json": {
+    "mtime": 1782731282.733449,
+    "ast_hash": "efb9b527a38b1a4f153756cb2fde0fff",
+    "semantic_hash": "efb9b527a38b1a4f153756cb2fde0fff"
+  },
+  "test/load.mjs": {
+    "mtime": 1782731349.0964687,
+    "ast_hash": "2be8afb5a9aa4f37827e1f0e3f8b737a",
+    "semantic_hash": "2be8afb5a9aa4f37827e1f0e3f8b737a"
+  },
+  "tsconfig.json": {
+    "mtime": 1782731282.734078,
+    "ast_hash": "237727235e2a8d2202f5e26fbc4616b2",
+    "semantic_hash": "237727235e2a8d2202f5e26fbc4616b2"
+  }
+}
