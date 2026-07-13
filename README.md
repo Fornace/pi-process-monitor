@@ -25,14 +25,14 @@ The pi equivalent of Claude Code's `Monitor` tool.
 ## Install
 
 ```bash
-pi install npm:pi-process-monitor@1.0.0      # global (all projects)
-pi install npm:pi-process-monitor@1.0.0 -l   # project-local (.pi/settings.json)
+pi install npm:pi-process-monitor@1.2.0      # global (all projects)
+pi install npm:pi-process-monitor@1.2.0 -l   # project-local (.pi/settings.json)
 ```
 
 Or try it once without installing:
 
 ```bash
-pi -e npm:pi-process-monitor
+pi -e npm:pi-process-monitor@1.2.0
 ```
 
 > **Naming note:** the bare `pi-monitor` name was already taken on npm, so this publishes as `pi-process-monitor`. The original `fornace-pi-monitor@1.0.0` release is deprecated in favor of this one. GitHub: [`Fornace/pi-process-monitor`](https://github.com/Fornace/pi-process-monitor).
@@ -73,6 +73,7 @@ Watcher k3n8p2a1x running (mode=poll). Will ping when: adapter.*saved | … | AL
 - `notifyOn` — array of case-insensitive regexes. A line matching **any** is pushed. Defaults to milestones + failures.
 - `heartbeatMinutes` — emit a status every N minutes even when silent.
 - `label` — human label.
+- `timeoutSeconds` — auto-kill the watcher after N seconds. Fires a TIMEOUT ping and stops the watcher. Default: no timeout.
 - `coalesceSeconds` (default 2), `maxLines` (default 20), `cwd` (default current).
 
 ### `monitor_status` — list watchers

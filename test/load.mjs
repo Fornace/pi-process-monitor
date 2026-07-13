@@ -60,6 +60,14 @@ ok([...tools].length === 3, "resume did not re-register tools");
 events["session_shutdown"]?.();
 ok(true, "session_shutdown did not throw");
 
+// timeout: start a long sleeper with a 200ms timeout, verify it auto-stops
+const r2 = await mon.execute("c", { command: "sleep 10", timeoutSeconds: 0.2 }, new AbortController().signal, undefined, fakeCtx());
+const twid = r2.details.watcher.id;
+ok(r2.details.watcher.alive === true, "timeout watcher starts alive");
+await new Promise(res => setTimeout(res, 500));
+const timeoutMsg = sent.find(m => /TIMEOUT after 0.2s/.test(m.content || ""));
+ok(timeoutMsg, "timeout fired and auto-stopped the watcher");
+
 // kill on a non-existent id
 const kill = tools.find(t => t.name === "monitor_kill");
 const knf = await kill.execute("c", { id: "nope" }, new AbortController().signal, undefined, fakeCtx());

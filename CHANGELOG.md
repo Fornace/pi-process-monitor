@@ -3,6 +3,13 @@
 All notable changes to **pi-process-monitor** are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-07-13
+### Added
+- `timeoutSeconds` parameter: auto-kill the watcher after N seconds. Fires a
+  TIMEOUT ping to the session and stops the watcher cleanly. Works in all three
+  modes (spawn, poll, file). Also available as `--timeout N` in the `/monitor`
+  command. Survives restart-resume for poll/file watchers.
+
 ## [1.1.0] — 2026-06-29
 ### Added
 - Gallery preview image (`pi.image`): a realistic terminal screenshot of the
@@ -34,5 +41,6 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - `monitor` skill (auto-invoked when the agent detects a long-running job) and
   `/watch` prompt template.
 
+[1.2.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.2.0
 [1.1.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.0.0

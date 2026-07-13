@@ -53,7 +53,7 @@ interface Watcher {
   alive: boolean;
   killed: boolean;
   // Everything needed to re-attach poll/file watchers after a restart:
-  resume?: { command?: string; logFile?: string; intervalSec?: number; cwd: string; notifyOn?: string[]; heartbeatMinutes?: number; coalesceSeconds?: number; maxLines?: number };
+  resume?: { command?: string; logFile?: string; intervalSec?: number; cwd: string; notifyOn?: string[]; heartbeatMinutes?: number; coalesceSeconds?: number; maxLines?: number; timeoutSeconds?: number };
   stop: () => void; // idempotent teardown
 }
 
@@ -187,6 +187,7 @@ export default function (pi: ExtensionAPI) {
   function launch(opts: {
     command?: string; intervalSec?: number; logFile?: string; notifyOn?: string[];
     heartbeatMinutes?: number; label?: string; coalesceSeconds?: number; maxLines?: number; cwd?: string;
+    timeoutSeconds?: number;
   }): Watcher {
     const command = opts.command, logFile = opts.logFile, intervalSec = opts.intervalSec;
     const mode: Watcher["mode"] = logFile ? "file" : intervalSec ? "poll" : "spawn";
@@ -213,9 +214,20 @@ export default function (pi: ExtensionAPI) {
       const prev = w.stop; w.stop = () => { clearInterval(hb); prev(); };
     }
 
+    if (opts.timeoutSeconds && opts.timeoutSeconds > 0) {
+      const timeoutMs = opts.timeoutSeconds * 1000;
+      const tm = setTimeout(() => {
+        if (w.alive && !w.killed) {
+          emit(w, `TIMEOUT after ${opts.timeoutSeconds}s — auto-stopping watcher`);
+          try { w.stop(); } catch { /* noop */ }
+        }
+      }, timeoutMs);
+      const prev = w.stop; w.stop = () => { clearTimeout(tm); prev(); };
+    }
+
     // Persist poll/file watchers for resume (spawn children can't survive restart)
     if (mode !== "spawn") {
-      w.resume = { command, logFile, intervalSec, cwd, notifyOn: opts.notifyOn, heartbeatMinutes: opts.heartbeatMinutes, coalesceSeconds: opts.coalesceSeconds, maxLines: opts.maxLines };
+      w.resume = { command, logFile, intervalSec, cwd, notifyOn: opts.notifyOn, heartbeatMinutes: opts.heartbeatMinutes, coalesceSeconds: opts.coalesceSeconds, maxLines: opts.maxLines, timeoutSeconds: opts.timeoutSeconds };
       pi.appendEntry("monitor-watcher", w.resume);
     }
     watchers.set(w.id, w);
@@ -231,7 +243,7 @@ export default function (pi: ExtensionAPI) {
       // Skip if an in-memory watcher already covers it (avoid dupes within one process)
       const dup = [...watchers.values()].some((w) => w.resume && w.resume.command === r.command && w.resume.logFile === r.logFile && w.alive);
       if (dup) continue;
-      const w = launch({ command: r.command, intervalSec: r.intervalSec, logFile: r.logFile, notifyOn: r.notifyOn, heartbeatMinutes: r.heartbeatMinutes, coalesceSeconds: r.coalesceSeconds, maxLines: r.maxLines, cwd: r.cwd, label: "(resumed)" });
+      const w = launch({ command: r.command, intervalSec: r.intervalSec, logFile: r.logFile, notifyOn: r.notifyOn, heartbeatMinutes: r.heartbeatMinutes, coalesceSeconds: r.coalesceSeconds, maxLines: r.maxLines, cwd: r.cwd, label: "(resumed)", timeoutSeconds: r.timeoutSeconds });
       ctx.ui?.notify?.(`monitor: re-attached watcher ${w.id} (${w.mode})`, "info");
     }
   });
@@ -258,6 +270,7 @@ export default function (pi: ExtensionAPI) {
     coalesceSeconds: Type.Optional(Type.Number({ description: "Merge rapid matching lines into one message over this window. Default 2." })),
     maxLines: Type.Optional(Type.Number({ description: "Cap lines per pushed message. Default 20." })),
     cwd: Type.Optional(Type.String({ description: "Working directory for spawn/poll. Default current." })),
+    timeoutSeconds: Type.Optional(Type.Number({ description: "Auto-kill the watcher after N seconds. Fires a TIMEOUT ping and stops the watcher. Default: no timeout." })),
   });
   type MonitorParams = Static<typeof monitorParams>;
 
@@ -284,6 +297,7 @@ export default function (pi: ExtensionAPI) {
         command: params.command, intervalSec: params.intervalSeconds, logFile: params.logFile,
         notifyOn: params.notifyOn, heartbeatMinutes: params.heartbeatMinutes, label: params.label,
         coalesceSeconds: params.coalesceSeconds, maxLines: params.maxLines, cwd: params.cwd ?? ctx.cwd,
+        timeoutSeconds: params.timeoutSeconds,
       });
       return { content: [{ type: "text", text: `Watcher ${w.id} running (mode=${w.mode}). Will ping when: ${w.watchingFor}.` }], details: { watcher: meta(w) } };
     },
@@ -331,19 +345,20 @@ export default function (pi: ExtensionAPI) {
       const isPoll = /(^|\s)--poll(\s|$)/.test(a);
       const isFile = /(^|\s)--file(\s|$)/.test(a);
       const every = /--every\s+(\d+)/.exec(a);
-      const afterDD = a.includes(" -- ") ? a.slice(a.indexOf(" -- ") + 4) : a.replace(/(^|\s)--(?:poll|file)(\s+\S+)?/g, "").replace(/--every\s+\d+/g, "").trim();
+      const timeout = /--timeout\s+(\d+)/.exec(a);
+      const afterDD = a.includes(" -- ") ? a.slice(a.indexOf(" -- ") + 4) : a.replace(/(^|\s)--(?:poll|file)(\s+\S+)?/g, "").replace(/--every\s+\d+/g, "").replace(/--timeout\s+\d+/g, "").trim();
       const command = afterDD.replace(/^\s*--\s*/, "").trim();
       let w: Watcher;
       if (isFile) {
         const logFile = (/--file\s+(\S+)/.exec(a)?.[1] ?? command).trim();
         if (!logFile) { ctx.ui.notify("Usage: /monitor --file <path>", "warning"); return; }
-        w = launch({ logFile, label: logFile.split("/").pop() });
+        w = launch({ logFile, label: logFile.split("/").pop(), timeoutSeconds: timeout ? Number(timeout[1]) : undefined });
       } else if (isPoll) {
         if (!command) { ctx.ui.notify("Usage: /monitor --poll --every 30 -- <command>", "warning"); return; }
-        w = launch({ command, intervalSec: every ? Number(every[1]) : 30, label: command.split(/\s+/).slice(0, 2).join(" ") });
+        w = launch({ command, intervalSec: every ? Number(every[1]) : 30, label: command.split(/\s+/).slice(0, 2).join(" "), timeoutSeconds: timeout ? Number(timeout[1]) : undefined });
       } else {
         if (!command) { ctx.ui.notify("Usage: /monitor <command...>", "warning"); return; }
-        w = launch({ command, label: command.split(/\s+/).slice(0, 2).join(" ") });
+        w = launch({ command, label: command.split(/\s+/).slice(0, 2).join(" "), timeoutSeconds: timeout ? Number(timeout[1]) : undefined });
       }
       ctx.ui.notify(`watcher ${w.id} running (${w.mode}) — will ping when: ${w.watchingFor}`, "info");
     },
