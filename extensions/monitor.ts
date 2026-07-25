@@ -42,8 +42,11 @@ const DEFAULT_NOTIFY = [
   "ready", "started", "listening", "success", "\\bok\\b", "✓", "✔",
 ];
 
-interface Watcher {
-  id: string;
+interface WatcherResume { command?: string; logFile?: string; intervalSec?: number; cwd: string; notifyOn?: string[]; heartbeatMinutes?: number; coalesceSeconds?: number; maxLines?: number; timeoutSeconds?: number }
+  interface PersistedWatcher extends WatcherResume { id?: string; stopped?: boolean }
+
+  interface Watcher {
+    id: string;
   label: string;
   mode: "spawn" | "poll" | "file";
   watchingFor: string;
@@ -53,8 +56,9 @@ interface Watcher {
   alive: boolean;
   killed: boolean;
   // Everything needed to re-attach poll/file watchers after a restart:
-  resume?: { command?: string; logFile?: string; intervalSec?: number; cwd: string; notifyOn?: string[]; heartbeatMinutes?: number; coalesceSeconds?: number; maxLines?: number; timeoutSeconds?: number };
-  stop: () => void; // idempotent teardown
+    resume?: WatcherResume;
+    persistedStop?: () => void;
+    stop: () => void; // idempotent teardown
 }
 
 interface WatcherMeta {
@@ -65,6 +69,7 @@ type TextBlock = { type: "text"; text: string };
 
 export default function (pi: ExtensionAPI) {
   const watchers = new Map<string, Watcher>();
+  let shuttingDown = false;
   const randId = () => Math.random().toString(36).slice(2, 11);
   const meta = (w: Watcher): WatcherMeta => ({
     id: w.id, label: w.label, mode: w.mode, watchingFor: w.watchingFor,
@@ -85,22 +90,32 @@ export default function (pi: ExtensionAPI) {
     );
   }
 
-  // Buffer matched lines, flush as one message every coalesceMs.
-  function makeCoalescer(w: Watcher, coalesceMs: number, maxLines: number) {
+  type Coalescer = ((line: string) => void) & { cancel: () => void; flush: () => void };
+  function makeCoalescer(w: Watcher, coalesceMs: number, maxLines: number): Coalescer {
     let buf: string[] = [];
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let canceled = false;
     const flush = () => {
       timer = null;
-      if (!buf.length) return;
+      if (canceled || !buf.length) return;
       const { content } = truncateTail(buf.join("\n"), { maxLines, maxBytes: 8000 });
       buf = [];
       emit(w, content);
     };
-    return (line: string) => {
+    const push = ((line: string) => {
+      if (canceled) return;
       buf.push(line);
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, coalesceMs);
+    }) as Coalescer;
+    push.flush = flush;
+    push.cancel = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      buf = [];
+      canceled = true;
     };
+    return push;
   }
 
   const compileMatchers = (notifyOn?: string[]): ((l: string) => boolean) => {
@@ -110,7 +125,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   // ---- spawn: run once, tail until exit ----
-  function startSpawn(w: Watcher, command: string, cwd: string, push: (l: string) => void) {
+  function startSpawn(w: Watcher, command: string, cwd: string, push: Coalescer) {
     let child: ChildProcess;
     try { child = spawn("bash", ["-c", command], { cwd }); }
     catch (e) { emit(w, `FAILED TO SPAWN: ${(e as Error).message}`); return; }
@@ -126,38 +141,62 @@ export default function (pi: ExtensionAPI) {
       if (buf.trim()) push(buf);
       w.alive = false;
       emit(w, `PROCESS EXITED (code=${code} signal=${signal ?? "none"})${w.killed ? " — killed by /monitor-kill" : ""}`);
+      push.flush();
+      push.cancel();
+      w.stop();
     });
-    child.on("error", (e) => { w.alive = false; emit(w, `SPAWN ERROR: ${e.message}`); });
+    child.on("error", (e) => {
+      w.alive = false;
+      emit(w, `SPAWN ERROR: ${e.message}`);
+      push.cancel();
+      w.stop();
+    });
     w.stop = () => {
       w.killed = true;
+      push.cancel();
       if (!child.killed && child.exitCode === null && child.signalCode === null) {
         child.kill("SIGTERM");
         setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } }, 3000);
       }
+      w.alive = false;
+      watchers.delete(w.id);
     };
   }
 
   // ---- poll: re-run a command on an interval (SSH/remote) ----
-  function startPoll(w: Watcher, command: string, cwd: string, intervalSec: number, matcher: (l: string) => boolean, push: (l: string) => void) {
+  function startPoll(w: Watcher, command: string, cwd: string, intervalSec: number, matcher: (l: string) => boolean, push: Coalescer) {
     const seen = new Set<string>();
+    let child: ChildProcess | undefined;
+    let running = false;
     const tick = () => {
-      let child: ChildProcess;
+      if (!w.alive || w.killed || running) return;
+      running = true;
       try { child = spawn("bash", ["-c", command], { cwd }); }
-      catch (e) { emit(w, `POLL SPAWN ERROR: ${(e as Error).message}`); return; } // next tick retries
+      catch (e) { running = false; emit(w, `POLL SPAWN ERROR: ${(e as Error).message}`); return; } // next tick retries
       child.stdout?.on("data", (data: Buffer) => {
         const lines = data.toString().split("\n").map((l) => l.trim()).filter(Boolean);
         for (const l of lines) { if (!seen.has(l) && matcher(l)) push(l); }
         seen.clear(); for (const l of lines) seen.add(l); // rolling dedup window
       });
       child.on("error", (e) => emit(w, `POLL ERROR: ${e.message}`));
+      child.on("exit", () => { running = false; child = undefined; });
     };
     tick();
     const iv = setInterval(tick, Math.max(2, intervalSec) * 1000);
-    w.stop = () => { w.killed = true; clearInterval(iv); w.alive = false; };
+    w.stop = () => {
+      w.killed = true;
+      clearInterval(iv);
+      push.cancel();
+      if (child && !child.killed && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      child = undefined;
+      running = false;
+      w.alive = false;
+      watchers.delete(w.id);
+    };
   }
 
   // ---- file: tail appended lines ----
-  function startFile(w: Watcher, logFile: string, matcher: (l: string) => boolean, push: (l: string) => void) {
+  function startFile(w: Watcher, logFile: string, matcher: (l: string) => boolean, push: Coalescer) {
     let size = 0;
     try { size = fs.statSync(logFile).size; } catch { /* may appear later */ }
     const readNew = () => {
@@ -179,7 +218,7 @@ export default function (pi: ExtensionAPI) {
     try { fw = fs.watch(logFile, () => { clearTimeout(debounce); debounce = setTimeout(readNew, 150); }); }
     catch { /* missing: rely on backstop */ }
     const iv = setInterval(readNew, 5000);
-    w.stop = () => { w.killed = true; clearInterval(iv); fw?.close(); w.alive = false; };
+    w.stop = () => { w.killed = true; clearInterval(iv); clearTimeout(debounce); debounce = undefined; fw?.close(); push.cancel(); w.alive = false; watchers.delete(w.id); };
   }
 
   // ---------------------------------------------------------------- watch builder
@@ -203,6 +242,7 @@ export default function (pi: ExtensionAPI) {
       stop: () => {},
     };
     const push = makeCoalescer(w, coalesceMs, maxLines);
+    const dispose = () => { push.cancel(); watchers.delete(w.id); };
 
     if (mode === "spawn") startSpawn(w, command!, cwd, push);
     else if (mode === "poll") startPoll(w, command!, cwd, intervalSec!, matcher, push);
@@ -211,7 +251,7 @@ export default function (pi: ExtensionAPI) {
     if (opts.heartbeatMinutes) {
       const hb = setInterval(() => { if (w.alive && !w.killed) emit(w, `heartbeat: still running (events=${w.eventCount})`); },
         Math.max(1, opts.heartbeatMinutes) * 60000);
-      const prev = w.stop; w.stop = () => { clearInterval(hb); prev(); };
+      const prev = w.stop; w.stop = () => { clearInterval(hb); dispose(); prev(); };
     }
 
     if (opts.timeoutSeconds && opts.timeoutSeconds > 0) {
@@ -222,24 +262,57 @@ export default function (pi: ExtensionAPI) {
           try { w.stop(); } catch { /* noop */ }
         }
       }, timeoutMs);
-      const prev = w.stop; w.stop = () => { clearTimeout(tm); prev(); };
+      const prev = w.stop; w.stop = () => { clearTimeout(tm); dispose(); prev(); };
     }
 
     // Persist poll/file watchers for resume (spawn children can't survive restart)
     if (mode !== "spawn") {
       w.resume = { command, logFile, intervalSec, cwd, notifyOn: opts.notifyOn, heartbeatMinutes: opts.heartbeatMinutes, coalesceSeconds: opts.coalesceSeconds, maxLines: opts.maxLines, timeoutSeconds: opts.timeoutSeconds };
-      pi.appendEntry("monitor-watcher", w.resume);
+      pi.appendEntry("monitor-watcher", { ...w.resume, id: w.id });
     }
+    // Persist a single tombstone when a resumable watcher stops, regardless of
+    // how many teardown paths (kill, timeout, shutdown) invoke stop.
+    if (mode !== "spawn") {
+      let tombstoned = false;
+      w.persistedStop = () => {
+        if (tombstoned || !w.resume) return;
+        tombstoned = true;
+        pi.appendEntry("monitor-watcher", { ...w.resume, id: w.id, stopped: true });
+      };
+    }
+    const rawStop = w.stop;
+    let stopped = false;
+    w.stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (!shuttingDown) persistStop(w);
+      rawStop();
+    };
     watchers.set(w.id, w);
     return w;
   }
 
+  const persistStop = (w: Watcher) => {
+    if (w.persistedStop) w.persistedStop();
+  };
+
   // ---- resume poll/file watchers recorded earlier in this session ----
+  function resumeKey(r: PersistedWatcher): string | undefined {
+    // Legacy records have no id; canonicalize by source so a newer tombstone
+    // also suppresses the corresponding legacy record.
+    return r.command ? `command:${r.command}` : r.logFile ? `file:${r.logFile}` : r.id;
+  }
+
   pi.on("session_start", async (_event, ctx) => {
+    const latest = new Map<string, PersistedWatcher>();
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type !== "custom" || entry.customType !== "monitor-watcher") continue;
-      const r = entry.data as Watcher["resume"];
-      if (!r || (!r.command && !r.logFile)) continue; // spawn, or nothing to resume
+      const r = entry.data as PersistedWatcher;
+      const key = resumeKey(r);
+      if (key) latest.set(key, r);
+    }
+    for (const r of latest.values()) {
+      if (r.stopped || (!r.command && !r.logFile)) continue;
       // Skip if an in-memory watcher already covers it (avoid dupes within one process)
       const dup = [...watchers.values()].some((w) => w.resume && w.resume.command === r.command && w.resume.logFile === r.logFile && w.alive);
       if (dup) continue;
@@ -248,8 +321,17 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // ---- teardown everything on session end ----
-  pi.on("session_shutdown", () => { for (const w of watchers.values()) { try { w.stop(); } catch { /* noop */ } } });
+  pi.on("session_shutdown", () => {
+    shuttingDown = true;
+    for (const w of [...watchers.values()]) {
+      try {
+          // Release local resources without tombstoning: poll/file watchers
+          // are intentionally re-attached on the next session_start.
+          w.stop();
+      } catch { /* noop */ }
+    }
+    watchers.clear();
+  });
 
   // ---- tidy inline rendering ----
   pi.registerMessageRenderer("monitor", (message, _opts, theme) => {

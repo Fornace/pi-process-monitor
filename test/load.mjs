@@ -50,11 +50,15 @@ await new Promise(res => setTimeout(res, 500));
 const exitMsg = sent.find(m => /PROCESS EXITED \(code=0/.test(m.content || ""));
 ok(exitMsg, "exit pinged (PROCESS EXITED present in messages)");
 
-// session_start resume: append a poll-watcher entry, then re-fire session_start
-entries.push({ type: "custom", customType: "monitor-watcher", data: { command: "echo hi", intervalSec: 60, cwd: "/tmp" } });
+// session_start resume: reconstruct only latest active records and ignore a stopped tombstone
+entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-a", command: "echo active-a", intervalSec: 60, cwd: "/tmp" } });
+entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-b", logFile: "/tmp/monitor-test.log", cwd: "/tmp" } });
+entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-stopped", command: "echo stopped", intervalSec: 60, cwd: "/tmp" } });
+entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-stopped", command: "echo stopped", intervalSec: 60, cwd: "/tmp", stopped: true } });
 await events["session_start"]?.({}, { sessionManager: { getEntries: smEntries }, ...fakeCtx() });
+const resumed = await status.execute("c", {}, new AbortController().signal, undefined, fakeCtx());
+ok(resumed.details.watchers.length === 2, "resume reattaches only latest active watchers");
 ok([...tools].length === 3, "resume did not re-register tools");
-// (the resumed watcher launches via the closure; just assert no throw)
 
 // teardown
 events["session_shutdown"]?.();

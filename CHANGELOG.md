@@ -3,6 +3,17 @@
 All notable changes to **pi-process-monitor** are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-07-25
+### Fixed
+- Prevented poll ticks from overlapping and cleaned up in-flight child processes on stop.
+- Canceled coalescer, debounce, heartbeat, and timeout resources during teardown.
+- Removed completed and stopped watchers from in-memory state to avoid retaining closures.
+- Added persisted watcher IDs and stop tombstones so stale poll/file watchers are not reattached after restart.
+- Added compatibility handling for legacy persisted watcher records without IDs.
+
+### Tests
+- Added restart-resume coverage for active records and stopped tombstones.
+
 ## [1.2.0] — 2026-07-13
 ### Added
 - `timeoutSeconds` parameter: auto-kill the watcher after N seconds. Fires a
