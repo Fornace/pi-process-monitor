@@ -155,6 +155,7 @@ export class MonitorRuntime {
     const claim = await acquireLease(path, owner);
     if (!claim.acquired) {
       watcher.owner = claim.existing;
+      watcher.foreignOwner = true;
       return false;
     }
     watcher.owner = owner;
@@ -275,7 +276,7 @@ export class MonitorRuntime {
 
   async recover(id: string, approve: boolean): Promise<LaunchResult | undefined> {
     const watcher = this.find(id);
-    if (!watcher || watcher.state !== "quarantined") return undefined;
+    if (!watcher || watcher.state !== "quarantined" || watcher.foreignOwner) return undefined;
     if (!approve) { await watcher.stop("stop"); return undefined; }
     this.watchers.delete(watcher.logicalId);
     return this.launch({ ...watcher.config, recoveryPolicy: "safe-auto", safetyClass: "observer" }, this.snapshots.get(watcher.logicalId));

@@ -1,154 +1,134 @@
 # pi-process-monitor
 
-> Non-blocking background watcher for [pi](https://pi.dev). Start a process, an SSH poll, or a log tail and get **pinged in-session** the moment a milestone hits, a failure occurs, or the process dies — without blocking.
+Non-blocking, crash-safe background observation for [Pi](https://pi.dev). Start one owned process, poll an independently owned remote job, or tail a file. Matching milestones and failures ping the session without blocking or flooding context.
 
-The pi equivalent of Claude Code's `Monitor` tool.
+![pi-process-monitor preview](docs/preview.png)
 
-![pi-process-monitor in action — a non-blocking watcher pinging the session when training milestones hit](docs/preview.png)
+## Safety model
 
-**Why it's better than Claude's naive Monitor:** Claude streams *every* stdout line as an event (= one LLM turn per line: expensive, floods context). `pi-process-monitor` does **conditional delivery** — only lines matching `notifyOn` (default: milestones + failures), plus process exit, are pushed, and rapid lines are coalesced into one message.
+- **Observe, do not schedule:** spawn mode owns a local workload; poll mode runs only fast read-only probes.
+- **Stable identity:** a logical watcher keeps one UUID through restart and exposes a short handle for commands.
+- **One local owner:** atomic leases prevent two Pi processes from running the same logical watcher.
+- **Conservative recovery:** files and classified remote probes auto-resume; local shell polls require confirmation.
+- **Bounded execution:** poll ticks never overlap and have timeout, output caps, exponential backoff, jitter, failure suspension, and owned process-group cleanup.
+- **Inspectable:** status/inspect report owner epoch, PID/PGID, command hash, process start, exit, signals, and truncation receipts.
+- **Crash-loop fuse:** repeated abnormal starts quarantine local recovery instead of replaying it.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  /monitor ssh h100 'tail -n3 train.log; pgrep -fc axolotl'   │
-│   --poll --every 30 --label h100-qlora                       │
-│                                                              │
-│  ✓ watcher k3n8p2a1x running (poll)                          │
-│  → will ping when: adapter.*saved | oom | killed | ALIVE=0   │
-│                                                              │
-│  (you keep chatting. ~30 min later:)                         │
-│  [watcher k3n8p2a1x · h100-qlora] step 100 loss=0.42         │
-│  [watcher k3n8p2a1x · h100-qlora] adapter saved → /root/out  │
-└─────────────────────────────────────────────────────────────┘
-```
+Long-running retryable computation still belongs in Restate, Trigger.dev, CI, or another durable workflow engine. Monitor observes those jobs; it does not replace them.
 
 ## Install
 
 ```bash
-pi install npm:pi-process-monitor@1.2.0      # global (all projects)
-pi install npm:pi-process-monitor@1.2.0 -l   # project-local (.pi/settings.json)
+pi install npm:pi-process-monitor@2
+# or project-local
+pi install npm:pi-process-monitor@2 -l
 ```
 
-Or try it once without installing:
+This release is a major because local poll recovery now fails closed. See [migration](docs/MIGRATION-v2.md).
 
-```bash
-pi -e npm:pi-process-monitor@1.2.0
+## Modes
+
+| Mode | Source | Default recovery | Purpose |
+|---|---|---|---|
+| spawn | `command` | `never` | One extension-owned local process tree |
+| poll | `command` + `intervalSeconds` | remote `safe-auto`; local `confirm` | Read-only observation of independent work |
+| file | `logFile` | `safe-auto` | Appended log lines |
+| structured | `probe` + optional interval | based on probe type | Process, file, SSH, or HTTP observation |
+
+Structured probes:
+
+```json
+{ "probe": { "type": "process", "pidFile": "/tmp/job.pid" }, "intervalSeconds": 10 }
+{ "probe": { "type": "file", "path": "/tmp/job.log", "tailLines": 20 } }
+{ "probe": { "type": "ssh", "host": "h100", "command": "tail -n5 train.log" }, "intervalSeconds": 30 }
+{ "probe": { "type": "http", "url": "https://ci.example/run/42", "method": "GET" }, "intervalSeconds": 30 }
 ```
 
-> **Naming note:** the bare `pi-monitor` name was already taken on npm, so this publishes as `pi-process-monitor`. The original `fornace-pi-monitor@1.0.0` release is deprecated in favor of this one. GitHub: [`Fornace/pi-process-monitor`](https://github.com/Fornace/pi-process-monitor).
+## Start or reuse a watcher
 
-Requires the `@earendil-works/pi-coding-agent` peer (already present in any pi install).
-
-## Three sources (pick one)
-
-| mode | tool params | command equivalent | use case |
-|------|-------------|--------------------|----------|
-| **spawn** | `command` | `/monitor <cmd>` | local long job — spawned once, tailed until exit |
-| **poll** | `command` + `intervalSeconds` | `/monitor --poll --every 30 -- <cmd>` | **remote/SSH** — re-run a check on a cadence |
-| **file** | `logFile` | `/monitor --file <path>` | tail appended lines of a log |
-
-## Usage (from the agent — tools)
-
-The agent calls these. You can also invoke them via the commands below.
-
-### `monitor` — start a watcher
 ```json
 {
-  "command": "ssh h100 'tail -n3 /root/train.log; echo ALIVE=$(pgrep -fc axolotl)'",
+  "probe": { "type": "ssh", "host": "h100", "command": "tail -n5 /root/train.log; echo ALIVE=$(pgrep -fc axolotl)" },
   "intervalSeconds": 30,
   "label": "h100-qlora",
-  "heartbeatMinutes": 10,
-  "notifyOn": ["adapter.*saved", "step (6[0-9]|[1-9][0-9][0-9]) ", "error|oom|killed|traceback", "ALIVE=0"]
+  "notifyOn": ["adapter.*saved", "error|oom|killed|traceback", "ALIVE=0"],
+  "expiresAt": "2026-08-03T00:00:00Z",
+  "reuse": "return-existing"
 }
 ```
-Returns immediately:
-```
-Watcher k3n8p2a1x running (mode=poll). Will ping when: adapter.*saved | … | ALIVE=0.
-```
 
-**Params:**
-- `command` — shell command. Spawned once & tailed (`spawn`); if `intervalSeconds` is also set, re-run on that cadence (`poll`).
-- `intervalSeconds` — poll cadence in seconds (enables poll mode). Min 2.
-- `logFile` — path to a log file to tail (enables file mode). Watch + 5s backstop.
-- `notifyOn` — array of case-insensitive regexes. A line matching **any** is pushed. Defaults to milestones + failures.
-- `heartbeatMinutes` — emit a status every N minutes even when silent.
-- `label` — human label.
-- `timeoutSeconds` — auto-kill the watcher after N seconds. Fires a TIMEOUT ping and stops the watcher. Default: no timeout.
-- `coalesceSeconds` (default 2), `maxLines` (default 20), `cwd` (default current).
+The result explicitly says `created`, `reused`, `replaced`, or `quarantined`.
 
-### `monitor_status` — list watchers
-```
-- k3n8p2a1x · h100-qlora [poll] alive=true events=4 last=2026-06-29T12:30:01Z watching: adapter.*saved | …
-```
+### Important parameters
 
-### `monitor_kill` — stop a watcher
-```json
-{ "id": "k3n8p2a1x" }
-```
-Spawn mode SIGTERMs then SIGKILLs the child after 3s.
+- `recoveryPolicy`: `never`, `confirm`, or `safe-auto`.
+- `reuse`: `return-existing` (default), `replace`, or `parallel`.
+- `reuseKey`: explicit logical purpose; required for intentional parallel local polls.
+- `expiresAt`: absolute ISO-8601 lifetime. `timeoutSeconds` remains as compatibility input and converts once to `expiresAt`.
+- `pollTimeoutSeconds`: per-tick deadline, shorter than the interval.
+- `maxConsecutiveFailures`, `backoffMaxSeconds`: bounded retry behavior.
+- `safetyClass`: `auto`, `observer`, or `unsafe-shell`. `observer` is an explicit acknowledgement, not a sandbox.
+- `notifyOn`, `heartbeatMinutes`, `coalesceSeconds`, `maxLines`, `cwd` retain their previous meanings.
 
-## Usage (human — slash commands, with autocomplete)
+Raw local shell polls that contain workload executables/verbs, redirection, or backgrounding are quarantined. Prefer a structured probe. Never put training, conversion, build, test, package installation, or “start-if-missing” logic in a poll command.
+
+## Tools
+
+| Tool | Purpose |
+|---|---|
+| `monitor` | create/reuse/replace/quarantine a watcher |
+| `monitor_status` | logical lifecycle, owner, recovery, expiry, tick and failure summary |
+| `monitor_inspect { id }` | full lease and process receipt |
+| `monitor_kill { id }` | stop one watcher and only its owned process group |
+| `monitor_recover` | list/approve/reject quarantined watchers |
+| `monitor_gc` | dry-run/apply checkpoint and external lease cleanup |
+| `monitor_kill_all { confirm: true }` | current-session owned groups only |
+
+## Commands
 
 ```bash
-/monitor ssh h100 'tail -n3 train.log; pgrep -fc axolotl'   # spawn watcher
-/monitor --poll --every 30 -- ssh h100 'tail -n3 train.log' # poll every 30s
-/monitor --file /var/log/train.log                          # tail a log
-/monitors                                                   # list
-/monitor-kill <TAB>                                         # autocomplete live ids
+/monitor npm run dev
+/monitor --poll --every 30 -- ssh h100 'tail -n5 train.log'
+/monitor --file /tmp/train.log
+/monitors
+/monitor-kill <TAB>
+/monitor-recover <id> approve|reject
+/monitor-gc --apply
 ```
 
-`/monitor-kill` autocompletes the live watcher ids, so you never have to copy them.
+## Recovery and persistence
 
-## Default `notifyOn` (case-insensitive regex)
+Version 2 state is reduced only from Pi's active branch. Recovery retains the logical ID and appends a claim, never a synthetic creation. Clean shutdown releases the lease but preserves user intent. Checkpoints bound logical history; external GC archives corrupt/orphan lease receipts and removes empty state directories. It never kills an unverified PID or unrelated process.
 
-**Milestones:** `saved`, `checkpoint`, `complete(d)`, `done`, `finished`, `ready`, `started`, `listening`, `success`, `ok`, `✓`, `✔`
-**Failures:** `error`, `fail(ed)`, `oom`, `out of memory`, `killed`, `traceback`, `exception`, `fatal`, `abort`, `panic`, `segfault`
+Startup emits one summary rather than one notification per historical record:
 
-Override per-call with `notifyOn: [...]`.
+```text
+monitor recovery: 2 resumed, 1 reused, 3 expired, 2 quarantined, 4 stale records compacted
+```
 
-## How the ping works (don't fight it)
+## Agent rules
 
-- **Idle agent** → the matching message triggers a fresh turn (agent wakes, reads the pushed lines, acts).
-- **Mid-stream agent** → the message queues as a **steer**, delivered after the current turn's tool calls, before the next LLM call. Your in-progress work is not lost.
-- **Rapid matching lines** are coalesced into one message so a chatty log doesn't flood context.
-
-This is built on pi's `pi.sendMessage({…}, { triggerTurn: true, deliverAs: "steer" })` — it wakes an idle agent without you blocking, and never interrupts an in-flight turn destructively.
-
-## Restart-resume
-
-**Poll & file watchers survive a pi restart** within the same session: they're persisted via `pi.appendEntry` and re-attach on the next `session_start`, announcing themselves. So if your laptop sleeps during an H100 training run, resuming the session re-attaches the watcher and you keep getting pings.
-
-Spawn-mode children can't survive (they're children of the pi process and are killed on shutdown) — that's inherent, not a bug.
-
-## What registers
-
-| kind | name | purpose |
-|------|------|---------|
-| tool | `monitor` | start a watcher (returns `{watcherId}`) |
-| tool | `monitor_status` | list watchers |
-| tool | `monitor_kill` | stop one |
-| command | `/monitor` | start (human; supports `--poll`/`--every`/`--file`) |
-| command | `/monitors` | list |
-| command | `/monitor-kill` | stop (autocompletes ids) |
-| skill | `monitor` | auto-invoked when the agent detects a long-running job |
-| prompt | `/watch` | quick start a watcher from a source string |
-
-## Pitfalls
-
-- **Don't** wrap a `monitor` call in a blocking `bash` wait — that defeats the point. `monitor` returns immediately; trust the ping.
-- For **poll mode**, the `command` must be *idempotent and fast* (a tail + a process check). The actual long job runs separately on the remote; the poll just checks it.
-- Always include a **death signal** in `notifyOn` for poll/file mode (e.g. `ALIVE=0`), otherwise a silently-dead remote job won't ping you.
-- For chatty logs, pass a **tight** `notifyOn` to avoid coalescer churn.
+1. Call `monitor_status` or rely on exact reuse before creation.
+2. Use spawn for local work and poll only for independent durable work.
+3. Prefer PID files, workflow/run IDs, exact paths, remote job IDs, and structured probes.
+4. Give temporary observers an absolute expiry.
+5. A timeout means diagnose; do not launch an identical watcher or blocking retry.
+6. After abnormal restarts, inspect quarantined watchers before approval.
 
 ## Development
 
 ```bash
-git clone https://github.com/Fornace/pi-process-monitor
-cd pi-process-monitor
-npm install      # peer deps
-npm test         # runtime smoke test
-npm run typecheck
+npm install
+npm run validate
 ```
+
+Validation runs TypeScript checks, deterministic state/lease/process/poll/incident tests, extension load smoke, and package dry-run. Every source file is kept at or below 400 lines.
+
+Grounding and migration receipts:
+
+- [Crash-safe engineering brief](docs/CRASH-SAFE-RECOVERY-BRIEF-2026-08-02.md)
+- [Grounding receipt](docs/GROUNDING-RECEIPT-2026-08-02.md)
+- [Migration guide](docs/MIGRATION-v2.md)
 
 ## License
 

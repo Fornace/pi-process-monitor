@@ -1,6 +1,7 @@
 import { spawnOwned, stopOwned, type OwnedProcess } from "./process.ts";
 import { samplePressure, type PressureSample } from "./pressure.ts";
-import type { RuntimeWatcher } from "./types.ts";
+import type { Clock, RuntimeWatcher } from "./types.ts";
+import { systemClock } from "./types.ts";
 
 export interface PollRuntimeOptions {
   watcher: RuntimeWatcher;
@@ -10,18 +11,25 @@ export interface PollRuntimeOptions {
   onFailure: (message: string) => void;
   onCriticalPressure: (sample: PressureSample) => void;
   ownedChildren: () => number;
+  pressureSample?: (ownedChildren: number) => Promise<PressureSample>;
+  random?: () => number;
+  clock?: Clock;
 }
 
 export interface PollController {
   stop: () => Promise<void>;
   tickNow: () => Promise<void>;
+  isRunning: () => boolean;
 }
 
-function jittered(baseMs: number): number {
-  return Math.max(100, Math.round(baseMs * (0.9 + Math.random() * 0.2)));
+function jittered(baseMs: number, random: () => number): number {
+  return Math.max(100, Math.round(baseMs * (0.9 + random() * 0.2)));
 }
 
 export function startPollRuntime(options: PollRuntimeOptions): PollController {
+  const clock = options.clock ?? systemClock;
+  const random = options.random ?? Math.random;
+  const pressureSample = options.pressureSample ?? samplePressure;
   const watcher = options.watcher;
   const intervalMs = Math.max(2000, (watcher.config.intervalSeconds ?? 30) * 1000);
   const timeoutMs = Math.max(250, Math.min(
@@ -36,11 +44,12 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
   let timeout: NodeJS.Timeout | undefined;
   let stopped = false;
   let delayedNotice = false;
+  const timeoutOwned = new WeakSet<OwnedProcess>();
 
   const schedule = (delay: number) => {
     if (stopped) return;
-    watcher.nextTickAt = Date.now() + delay;
-    timer = setTimeout(() => { void tick(); }, jittered(delay));
+    watcher.nextTickAt = clock.now() + delay;
+    timer = clock.setTimeout(() => { void tick(); }, jittered(delay, random));
     timer.unref?.();
   };
 
@@ -64,7 +73,7 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
 
   const tick = async () => {
     if (stopped || active) return;
-    const pressure = await samplePressure(options.ownedChildren());
+    const pressure = await pressureSample(options.ownedChildren());
     if (pressure.level === "critical") {
       stopped = true;
       options.onCriticalPressure(pressure);
@@ -77,7 +86,7 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
       return;
     }
     delayedNotice = false;
-    watcher.lastTickAt = Date.now();
+    watcher.lastTickAt = clock.now();
     try {
       active = spawnOwned({
         logicalId: watcher.logicalId,
@@ -89,9 +98,10 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
       });
       watcher.child = active.child;
       watcher.receipt = active.receipt;
-      timeout = setTimeout(() => {
+      timeout = clock.setTimeout(() => {
         const owned = active;
         if (!owned) return;
+        timeoutOwned.add(owned);
         void stopOwned(owned, { termGraceMs: 1000, killGraceMs: 1000 }).then(() => {
           active = undefined;
           watcher.child = undefined;
@@ -99,18 +109,19 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
         });
       }, timeoutMs);
       timeout.unref?.();
-      active.child.once("error", (error) => {
-        if (timeout) clearTimeout(timeout);
+      const started = active;
+      started.child.once("error", (error) => {
+        if (timeout) clock.clearTimeout(timeout);
         active = undefined;
         watcher.child = undefined;
-        fail(`POLL ERROR: ${error.message}`);
+        if (!timeoutOwned.has(started)) fail(`POLL ERROR: ${error.message}`);
       });
-      active.child.once("exit", (code, signal) => {
-        if (timeout) clearTimeout(timeout);
+      started.child.once("exit", (code, signal) => {
+        if (timeout) clock.clearTimeout(timeout);
         timeout = undefined;
-        active = undefined;
+        if (active === started) active = undefined;
         watcher.child = undefined;
-        if (stopped) return;
+        if (stopped || timeoutOwned.has(started)) return;
         if (code === 0) {
           watcher.consecutiveFailures = 0;
           schedule(intervalMs);
@@ -122,11 +133,12 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
   void tick();
   return {
     tickNow: tick,
+    isRunning: () => Boolean(active),
     stop: async () => {
       if (stopped && !active) return;
       stopped = true;
-      if (timer) clearTimeout(timer);
-      if (timeout) clearTimeout(timeout);
+      if (timer) clock.clearTimeout(timer);
+      if (timeout) clock.clearTimeout(timeout);
       const owned = active;
       active = undefined;
       if (owned) await stopOwned(owned);

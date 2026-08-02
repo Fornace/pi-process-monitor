@@ -26,6 +26,7 @@ export function watcherMeta(watcher: RuntimeWatcher) {
     eventCount: watcher.eventCount,
     consecutiveFailures: watcher.consecutiveFailures,
     receipt: watcher.receipt,
+    foreignOwner: watcher.foreignOwner,
   };
 }
 
@@ -111,9 +112,9 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
     name: "monitor_kill", label: "Monitor kill", description: "Stop one logical watcher and only its verified extension-owned process group.",
     parameters: Type.Object({ id: Type.String() }), async execute(_id, params) {
       const watcher = runtime.find(params.id);
-      if (watcher) await watcher.stop("stop");
+      if (watcher && !watcher.foreignOwner) await watcher.stop("stop");
       const value = watcher ? watcherMeta(watcher) : null;
-      return { ...text(watcher ? `Stopped ${watcher.handleId}; cleanup=${watcher.receipt?.cleanupVerified ?? "n/a"}.` : `No watcher ${params.id}.`), details: { watcher: value } };
+      return { ...text(watcher ? `${watcher.foreignOwner ? "Skipped foreign owner" : "Stopped"} ${watcher.handleId}; cleanup=${watcher.receipt?.cleanupVerified ?? "n/a"}.` : `No watcher ${params.id}.`), details: { watcher: value } };
     },
   });
 
@@ -143,7 +144,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
     name: "monitor_kill_all", label: "Monitor kill all", description: "Stop all current-session extension-owned watchers. Requires confirm=true.",
     parameters: Type.Object({ confirm: Type.Boolean() }), async execute(_id, params) {
       if (!params.confirm) throw new Error("monitor_kill_all requires confirm=true");
-      const list = [...runtime.watchers.values()];
+      const list = [...runtime.watchers.values()].filter((watcher) => !watcher.foreignOwner);
       await Promise.all(list.map((watcher) => watcher.stop("stop")));
       return { ...text(`Stopped ${list.length} current-session watcher(s).`), details: { stopped: list.map(watcherMeta) } };
     },

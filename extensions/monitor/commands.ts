@@ -77,7 +77,7 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
     getArgumentCompletions: completions,
     handler: async (args, ctx) => {
       const watcher = runtime.find(args.trim());
-      if (!watcher) { ctx.ui.notify(`No watcher ${args.trim()}.`, "warning"); return; }
+      if (!watcher || watcher.foreignOwner) { ctx.ui.notify(watcher ? `Watcher ${watcher.handleId} is owned by another live runtime; not stopped.` : `No watcher ${args.trim()}.`, "warning"); return; }
       await watcher.stop("stop");
       ctx.ui.notify(`Stopped ${watcher.handleId}; cleanup=${watcher.receipt?.cleanupVerified ?? "n/a"}.`, "info");
     },

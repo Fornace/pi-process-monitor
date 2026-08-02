@@ -3,7 +3,11 @@ import test from "node:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { acquireLease, gcLeaseFile, releaseLease, renewLease, validateOwner } from "../extensions/monitor/leases.ts";
+
+const execFileAsync = promisify(execFile);
 
 function owner(epoch, overrides = {}) {
   return {
@@ -29,6 +33,28 @@ test("atomic race yields exactly one lease owner", async () => {
     const claims = await Promise.all(Array.from({ length: 20 }, (_, index) => acquireLease(path, owner(String(index)), env())));
     assert.equal(claims.filter((claim) => claim.acquired).length, 1);
     assert.equal(claims.filter((claim) => !claim.acquired && claim.existing).length, 19);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("two independent Node processes racing one lease produce one owner", async () => {
+  const root = await mkdtemp(join(tmpdir(), "monitor-lease-process-"));
+  const path = join(root, "watch.lease");
+  const barrier = join(root, "barrier");
+  const worker = new URL("./fixtures/lease-worker.mjs", import.meta.url).pathname;
+  try {
+    await writeFile(barrier, "wait");
+    const children = Array.from({ length: 8 }, (_, index) => spawn(process.execPath, [worker, path, String(index), barrier], { stdio: ["ignore", "pipe", "pipe"] }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await writeFile(barrier, "go");
+    const results = await Promise.all(children.map((child) => new Promise((resolve, reject) => {
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.on("error", reject);
+      child.on("exit", (code) => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(stderr)));
+    })));
+    assert.equal(results.filter((result) => result.acquired).length, 1);
+    assert.equal(results.filter((result) => result.existing).length, 7);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

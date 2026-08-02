@@ -1,6 +1,15 @@
-Start a non-blocking watcher with the source below and default notifyOn (milestones + failures). Report the watcher id, then keep working — do NOT block waiting. I'll be pinged when a milestone hits, a failure occurs, or the process dies.
+Safely start or reuse a non-blocking watcher for the source below.
+
+Before creating it, call `monitor_status`. Use `reuse: "return-existing"` unless I explicitly request replacement or parallel watchers.
+
+Classify the source correctly:
+- local workload → spawn once; recovery `never`;
+- independent remote/durable job → read-only poll or structured SSH/HTTP/process probe;
+- log path → file tail.
+
+Never place the actual workload, mutation, output redirection, backgrounding, or “start if missing” logic in a poll command. Prefer a structured probe and narrow PID/run/path identity. Set an absolute `expiresAt` for temporary observation.
 
 Source:
 $ARGUMENTS
 
-After starting, tell me the watcher id, the mode (spawn/poll/file), and what it will ping on. Then continue with whatever else we were doing.
+Report the action (`created`, `reused`, `replaced`, or `quarantined`), logical/short watcher ID, mode, recovery policy, expiry, and what will trigger a ping. If quarantined, do not approve it automatically—inspect and explain why. Then continue working; do not block waiting.

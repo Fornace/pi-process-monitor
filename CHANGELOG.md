@@ -1,57 +1,58 @@
 # Changelog
 
-All notable changes to **pi-process-monitor** are documented here.
-This project adheres to [Semantic Versioning](https://semver.org/).
+All notable changes to `pi-process-monitor` are documented here.
+
+## [2.0.0] — unreleased
+
+### Crash-safe identity and recovery
+
+- Added stable logical watcher UUIDs, canonical SHA-256 source fingerprints, monotonic lifecycle revisions, absolute expiry, and active-branch-only state reduction.
+- Added deterministic migration for legacy `monitor-watcher` history without writing the legacy shape.
+- Recovery now claims the same logical watcher instead of replaying a new creation.
+- Added atomic cross-process leases with runtime/owner epochs, host boot ID, PID, process-start validation, renewal, clean release, stale archive, and fail-closed corruption handling.
+- Added abnormal-restart quarantine and session crash-loop fuses.
+- Added exact `return-existing`, explicit `replace`, and intentional keyed `parallel` reuse semantics.
+
+### Bounded observation and ownership
+
+- Added structured process/file/SSH/HTTP probes.
+- Local raw-shell polls default to confirmation and workload-like/mutating commands quarantine before launch.
+- Poll ticks now have no overlap, per-tick timeout, bounded stdout/stderr, exponential backoff with jitter, failure suspension, and host-pressure delay/quarantine.
+- Spawn and poll children run in dedicated POSIX process groups with TERM/KILL escalation and verified cleanup.
+- Added process receipts: logical ID, owner epoch, argv hash/display, cwd, PID, PGID, parent PID, boot ID, process start, exit, signals, truncation, and cleanup proof.
+
+### Lifecycle GC and interfaces
+
+- Added versioned checkpoints with bounded terminal retention and external lease cleanup.
+- Added `monitor_inspect`, `monitor_recover`, `monitor_gc`, and confirmed `monitor_kill_all`.
+- Status and startup summaries now expose lifecycle/ownership without notification storms.
+- Split the extension into single-responsibility modules, all below 400 lines.
+- Rewrote README, skill, `/watch`, migration, and grounding receipts to match runtime behavior.
+
+### Verification
+
+- Added active-branch, state transition, checkpoint, malformed/future schema, deterministic legacy migration, exact reuse, recovery identity, concurrent lease owner, stale PID validation, poll timeout/backoff/caps, process-tree teardown, incident replay, 100-cycle reduction, no-UI, clock, corrupt lease, pressure-unavailable, and effective-version mismatch tests.
+
+### Breaking
+
+- Local poll recovery no longer silently auto-resumes. It defaults to `confirm` and unsafe/ambiguous shell polling is quarantined.
+- The package therefore requires a major release rather than a compatible minor.
 
 ## [1.3.0] — 2026-07-25
-### Fixed
-- Prevented poll ticks from overlapping and cleaned up in-flight child processes on stop.
-- Canceled coalescer, debounce, heartbeat, and timeout resources during teardown.
-- Removed completed and stopped watchers from in-memory state to avoid retaining closures.
-- Added persisted watcher IDs and stop tombstones so stale poll/file watchers are not reattached after restart.
-- Added compatibility handling for legacy persisted watcher records without IDs.
 
-### Tests
-- Added restart-resume coverage for active records and stopped tombstones.
+### Fixed
+
+- Idempotent watcher teardown and in-process deduplication.
+- Persisted stop tombstones and clean-shutdown resource release.
 
 ## [1.2.0] — 2026-07-13
-### Added
-- `timeoutSeconds` parameter: auto-kill the watcher after N seconds. Fires a
-  TIMEOUT ping to the session and stops the watcher cleanly. Works in all three
-  modes (spawn, poll, file). Also available as `--timeout N` in the `/monitor`
-  command. Survives restart-resume for poll/file watchers.
+
+- Added relative `timeoutSeconds` watcher auto-stop.
 
 ## [1.1.0] — 2026-06-29
-### Added
-- Gallery preview image (`pi.image`): a realistic terminal screenshot of the
-  extension in action (H100 QLoRA training → milestone/failure pings), 1280×720.
-- `docs/preview.png` (+ `preview@2x.png`) and the HTML source used to render it.
 
-### Changed
-- Tightened the package description so it no longer truncates mid-word in the
-  pi registry card.
+- Added gallery preview metadata.
 
 ## [1.0.0] — 2026-06-29
-### Added
-- `monitor` tool: non-blocking background watcher with three sources —
-  `spawn` (local process, tail until exit), `poll` (re-run a command on an
-  interval; ideal for SSH/remote), `file` (tail appended log lines).
-- **Conditional delivery**: only lines matching `notifyOn` (default milestones +
-  failures) plus process exit are pushed — no per-line LLM turns.
-- **Coalescing**: rapid matching lines merged into one message (default 2s
-  window, max 20 lines).
-- `monitor_status` tool + `/monitors` command to list active watchers.
-- `monitor_kill` tool + `/monitor-kill <id>` command. The command autocompletes
-  live watcher ids; spawn mode SIGTERMs then SIGKILLs the child.
-- `/monitor <cmd>` command (with `--poll`/`--every N`/`--file` flags) for
-  human-driven starts.
-- **Restart-resume**: poll & file watchers persist via `appendEntry` and
-  re-attach within the same session after a pi restart, announcing themselves.
-- `heartbeatMinutes` for silent-but-alive jobs.
-- Custom message rendering (colored watcher id + label).
-- `monitor` skill (auto-invoked when the agent detects a long-running job) and
-  `/watch` prompt template.
 
-[1.2.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.2.0
-[1.1.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.1.0
-[1.0.0]: https://github.com/Fornace/pi-process-monitor/releases/tag/v1.0.0
+- Initial `pi-process-monitor` release.

@@ -1,5 +1,17 @@
 import type { ChildProcess } from "node:child_process";
 
+export interface Clock {
+  now(): number;
+  setTimeout(callback: () => void, delayMs: number): NodeJS.Timeout;
+  clearTimeout(timer: NodeJS.Timeout): void;
+}
+
+export const systemClock: Clock = {
+  now: Date.now,
+  setTimeout: (callback, delay) => setTimeout(callback, delay),
+  clearTimeout: (timer) => clearTimeout(timer),
+};
+
 export const STATE_SCHEMA_VERSION = 2 as const;
 export const STATE_CUSTOM_TYPE = "monitor-state-v2";
 export const LEGACY_CUSTOM_TYPE = "monitor-watcher";
@@ -145,6 +157,7 @@ export interface RuntimeWatcher {
   owner?: OwnerRecord;
   receipt?: ProcessReceipt;
   child?: ChildProcess;
+  foreignOwner?: boolean;
   stop: (intent?: "stop" | "release" | "expire" | "quarantine") => Promise<void>;
 }
 

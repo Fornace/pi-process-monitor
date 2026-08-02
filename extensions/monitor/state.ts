@@ -163,6 +163,11 @@ export function reduceState(entries: SessionEntryLike[], now = Date.now()): Redu
       continue;
     }
     const previous = result.watchers.get(event.logicalId);
+    if (!previous && event.revision > 1 && ["claimed", "heartbeat", "released", "quarantined"].includes(event.event)) {
+      const snapshot = snapshotFromEvent(event)!;
+      result.watchers.set(snapshot.logicalId, snapshot);
+      continue;
+    }
     if (!validTransition(previous, event)) { result.ignored++; continue; }
     const snapshot = snapshotFromEvent(event)!;
     result.watchers.set(snapshot.logicalId, snapshot);
