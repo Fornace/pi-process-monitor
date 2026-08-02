@@ -83,6 +83,17 @@ test("local shell poll defaults to quarantine and launches zero workload process
   await cleanup(runtime);
 });
 
+test("failed resource startup releases claim and quarantines without leaking owner", async () => {
+  const h = harness();
+  const runtime = new MonitorRuntime(h.pi);
+  await runtime.startSession(h.ctx);
+  const result = await runtime.launch({ probe: { type: "process" }, intervalSeconds: 2, cwd: "/tmp", recoveryPolicy: "safe-auto", reuse: "return-existing", safetyClass: "observer" });
+  assert.equal(result.action, "quarantined");
+  assert.equal(result.watcher.owner, undefined);
+  assert.equal(result.watcher.state, "quarantined");
+  await cleanup(runtime);
+});
+
 test("file observer works in no-UI mode", async () => {
   const root = await mkdtemp(join(tmpdir(), "monitor-file-"));
   const file = join(root, "log");

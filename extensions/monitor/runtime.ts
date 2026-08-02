@@ -116,7 +116,16 @@ export class MonitorRuntime {
       return { action: "reused", watcher, reason };
     }
     this.watchers.set(logicalId, watcher);
-    this.startResources(watcher);
+    try { this.startResources(watcher); }
+    catch (error) {
+      await this.releaseClaim(watcher);
+      this.watchers.delete(logicalId);
+      const reason = `resource startup failed: ${(error as Error).message}`;
+      this.transition(watcher, "quarantined", reason);
+      this.watchers.set(logicalId, watcher);
+      this.installQuarantinedStop(watcher);
+      return { action: "quarantined", watcher, reason };
+    }
     return { action: restoring ? "reused" : existing ? "replaced" : "created", watcher };
   }
 
@@ -147,6 +156,10 @@ export class MonitorRuntime {
       lastEventAt: null, lastTickAt: null, eventCount: 0, consecutiveFailures: 0,
       stop: async () => {},
     };
+  }
+
+  private async releaseClaim(watcher: RuntimeWatcher): Promise<void> {
+    await (watcher as RuntimeWatcher & { releaseLease?: () => Promise<void> }).releaseLease?.();
   }
 
   private async claim(watcher: RuntimeWatcher): Promise<boolean> {
@@ -217,7 +230,7 @@ export class MonitorRuntime {
       if (heartbeat) clearInterval(heartbeat);
       coalescer.cancel();
       await resourceStop();
-      await (watcher as RuntimeWatcher & { releaseLease?: () => Promise<void> }).releaseLease?.();
+      await this.releaseClaim(watcher);
       const state = intent === "release" ? "released" : intent === "expire" ? "expired" : intent === "quarantine" ? "quarantined" : "stopped";
       if (!(this.shuttingDown && state === "released")) this.transition(watcher, state);
       else this.transition(watcher, "released", "clean session shutdown");

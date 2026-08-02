@@ -9,7 +9,9 @@ function snapshot(event) {
 function entry(data) { return { type: "custom", id: `${data.logicalId}-${data.revision}`, timestamp: data.updatedAt, customType: "monitor-state-v2", data }; }
 function base() {
   const created = nextEvent(undefined, { logicalId: "fault", event: "created", mode: "file", sourceFingerprint: "f", updatedAt: "2026-08-02T10:00:00Z", recoveryPolicy: "safe-auto", config });
-  const claimed = nextEvent(snapshot(created), { logicalId: "fault", event: "claimed", mode: "file", sourceFingerprint: "f", owner: { runtimeId: "r", ownerEpoch: "e", pid: 1, bootId: "b", processStart: "s", leaseUntil: "2026-08-02T10:01:00Z" }, updatedAt: "2026-08-02T10:00:01Z", recoveryPolicy: "safe-auto", config });
+  const previousRuntime = "r";
+  const owner = { runtimeId: previousRuntime, ownerEpoch: "e", pid: 1, bootId: "b", processStart: "s", leaseUntil: "2026-08-02T10:01:00Z" };
+  const claimed = nextEvent(snapshot(created), { logicalId: "fault", event: "claimed", mode: "file", sourceFingerprint: "f", owner, updatedAt: "2026-08-02T10:00:01Z", recoveryPolicy: "safe-auto", config });
   return { created, claimed };
 }
 
