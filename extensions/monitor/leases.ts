@@ -43,10 +43,9 @@ export function hostBootId(): string {
   if (linux) return linux;
   try {
     const raw = execFileSync("sysctl", ["-n", "kern.boottime"], { encoding: "utf8", timeout: 1000 }).trim();
-    return raw || `unknown-${process.platform}`;
-  } catch {
-    return `unknown-${process.platform}`;
-  }
+    if (raw) return raw;
+  } catch { /* unsupported platform */ }
+  throw new Error(`host boot identity unavailable on ${process.platform}`);
 }
 
 export function processStartTime(pid: number): string | undefined {
@@ -165,17 +164,45 @@ export async function renewLease(path: string, owner: OwnerRecord, leaseMs = DEF
   const current = await readOwner(path);
   if (!current || current.ownerEpoch !== owner.ownerEpoch) throw new Error("lease ownership changed");
   const renewed = { ...owner, leaseUntil: new Date(env.now() + leaseMs).toISOString() };
-  const temp = `${path}.${owner.ownerEpoch}.tmp`;
-  await writeFile(temp, `${JSON.stringify(renewed)}\n`, { mode: 0o600 });
-  await rename(temp, path);
+  // Write through the already-open lease inode so a concurrent stale archive +
+  // replacement cannot be overwritten by path rename.
+  const handle = await open(path, "r+");
+  try {
+    const verified = JSON.parse(await handle.readFile("utf8")) as OwnerRecord;
+    if (verified.ownerEpoch !== owner.ownerEpoch) throw new Error("lease ownership changed");
+    await handle.truncate(0);
+    await handle.write(`${JSON.stringify(renewed)}\n`, 0, "utf8");
+    await handle.sync();
+  } finally { await handle.close(); }
+  const after = await readOwner(path);
+  if (!after || after.ownerEpoch !== owner.ownerEpoch) throw new Error("lease ownership changed during renewal");
   return renewed;
 }
 
 export async function releaseLease(path: string, owner: OwnerRecord): Promise<boolean> {
   const current = await readOwner(path);
   if (!current || current.ownerEpoch !== owner.ownerEpoch) return false;
-  try { await rm(path); return true; }
+  const archive = `${path}.release-${owner.ownerEpoch}`;
+  try { await rename(path, archive); }
   catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
+  const moved = await readOwner(archive);
+  if (!moved || moved.ownerEpoch !== owner.ownerEpoch) {
+    // A different inode won the path race. Restore only if the lease path is free.
+    try { await rename(archive, path); } catch { /* preserve foreign archive */ }
+    return false;
+  }
+  await rm(archive, { force: true });
+  return true;
+}
+
+export async function inspectLeaseFile(path: string, env = defaultLeaseEnvironment): Promise<"live" | "stale" | "corrupt" | "missing"> {
+  let info;
+  try { info = await stat(path); }
+  catch { return "missing"; }
+  if (!info.isFile()) return "corrupt";
+  const owner = await readOwner(path);
+  if (!owner) return "corrupt";
+  return validateOwner(owner, env).alive ? "live" : "stale";
 }
 
 export async function gcLeaseFile(path: string, env = defaultLeaseEnvironment): Promise<"live" | "removed" | "corrupt" | "missing"> {

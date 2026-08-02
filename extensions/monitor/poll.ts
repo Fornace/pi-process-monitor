@@ -40,6 +40,7 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
   const maxBackoffMs = Math.max(intervalMs, (watcher.config.backoffMaxSeconds ?? 300) * 1000);
   const seen = new Set<string>();
   let active: OwnedProcess | undefined;
+  let tickPending = false;
   let timer: NodeJS.Timeout | undefined;
   let timeout: NodeJS.Timeout | undefined;
   let stopped = false;
@@ -72,22 +73,25 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
   };
 
   const tick = async () => {
-    if (stopped || active) return;
-    const pressure = await pressureSample(options.ownedChildren());
-    if (pressure.level === "critical") {
-      stopped = true;
-      options.onCriticalPressure(pressure);
-      return;
-    }
-    if (pressure.level === "elevated") {
-      if (!delayedNotice) options.onFailure(`POLL DELAYED: ${pressure.reasons.join(", ")}`);
-      delayedNotice = true;
-      schedule(Math.min(maxBackoffMs, intervalMs * 2));
-      return;
-    }
-    delayedNotice = false;
-    watcher.lastTickAt = clock.now();
+    if (stopped || active || tickPending) return;
+    tickPending = true;
     try {
+      const pressure = await pressureSample(options.ownedChildren());
+      if (stopped || active) return;
+      if (pressure.level === "critical") {
+        stopped = true;
+        options.onCriticalPressure(pressure);
+        return;
+      }
+      if (pressure.level === "elevated") {
+        if (!delayedNotice) options.onFailure(`POLL DELAYED: ${pressure.reasons.join(", ")}`);
+        delayedNotice = true;
+        schedule(Math.min(maxBackoffMs, intervalMs * 2));
+        return;
+      }
+      delayedNotice = false;
+      watcher.lastTickAt = clock.now();
+      try {
       active = spawnOwned({
         logicalId: watcher.logicalId,
         ownerEpoch: watcher.owner?.ownerEpoch ?? "unowned",
@@ -127,7 +131,8 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
           schedule(intervalMs);
         } else fail(`POLL EXIT code=${code} signal=${signal ?? "none"}`);
       });
-    } catch (error) { active = undefined; fail(`POLL SPAWN ERROR: ${(error as Error).message}`); }
+      } catch (error) { active = undefined; fail(`POLL SPAWN ERROR: ${(error as Error).message}`); }
+    } finally { tickPending = false; }
   };
 
   void tick();

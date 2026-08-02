@@ -36,6 +36,11 @@ test("canonical fingerprint ignores harmless whitespace", () => {
 
 test("classifier preserves remote observer and rejects local workload poll", () => {
   assert.deepEqual(classifyPoll(baseConfig).local, false);
+  assert.equal(classifyPoll(baseConfig).classification, "safe-observer");
+  const unsafeRemote = classifyPoll({ ...baseConfig, command: "ssh host 'python train.py > out.log &'" });
+  assert.equal(unsafeRemote.local, false);
+  assert.equal(unsafeRemote.classification, "unsafe-shell");
+  assert.equal(classifyPoll({ ...baseConfig, command: "test ! -f /tmp/done && python train.py" }).classification, "unsafe-shell");
   const unsafe = classifyPoll({ ...baseConfig, command: "python train.py > out.log &" });
   assert.equal(unsafe.classification, "unsafe-shell");
   assert.match(unsafe.reasons.join(" "), /workload|operator/);

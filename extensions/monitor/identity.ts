@@ -154,11 +154,22 @@ export function classifyPoll(config: WatcherConfig): SafetyDecision {
   }
   const command = config.command ?? "";
   const tokens = shellTokens(command);
-  const executable = (tokens.find((token) => !SHELL_OPERATORS.has(token)) ?? "").split("/").pop()?.toLowerCase() ?? "";
-  if (executable === "ssh") return { classification: "safe-observer", local: false, reasons: ["remote ssh probe"] };
+  const executableIndex = tokens.findIndex((token) => !SHELL_OPERATORS.has(token));
+  const executable = (tokens[executableIndex] ?? "").split("/").pop()?.toLowerCase() ?? "";
+  if (executable === "ssh") {
+    const host = tokens[executableIndex + 1] ?? "";
+    const remote = tokens.slice(executableIndex + 2).join(" ").replace(/^(['"])(.*)\1$/, "$2");
+    const nested: WatcherConfig = { ...config, command: remote };
+    const nestedSafety = remote ? classifyPoll(nested) : { classification: "ambiguous" as const, reasons: ["missing remote probe command"] };
+    if (nestedSafety.classification === "unsafe-shell") return { classification: "unsafe-shell", local: false, reasons: nestedSafety.reasons.map((reason) => `remote ${reason}`) };
+    return { classification: nestedSafety.classification === "safe-observer" ? "safe-observer" : "ambiguous", local: false, reasons: [`remote ssh probe ${host}`, ...nestedSafety.reasons] };
+  }
   const reasons: string[] = [];
-  if (tokens.some((token) => ["&", ">", ">>", "<", "<<", "|&"].includes(token))) reasons.push("mutation/background shell operator");
-  if (WORKLOAD_EXECUTABLES.has(executable)) reasons.push(`workload executable ${executable}`);
+  if (tokens.some((token) => [";", "&&", "||", "&", ">", ">>", "<", "<<", "|&"].includes(token))) reasons.push("mutation/compound/background shell operator");
+  const segmentExecutables = tokens.filter((token, index) => index === 0 || SHELL_OPERATORS.has(tokens[index - 1]!))
+    .map((token) => token.replace(/^['"]|['"]$/g, "").split("/").pop()?.toLowerCase() ?? "");
+  if (segmentExecutables.some((name) => WORKLOAD_EXECUTABLES.has(name))) reasons.push(`workload executable ${segmentExecutables.find((name) => WORKLOAD_EXECUTABLES.has(name))}`);
+  if (WORKLOAD_EXECUTABLES.has(executable) && !reasons.some((reason) => reason.startsWith("workload executable"))) reasons.push(`workload executable ${executable}`);
   if (tokens.some((token) => WORKLOAD_VERBS.has(token.toLowerCase()))) reasons.push("workload verb");
   if (reasons.length) return { classification: "unsafe-shell", local: true, reasons };
   if (OBSERVER_EXECUTABLES.has(executable)) return { classification: "safe-observer", local: true, reasons: [`observer executable ${executable}`] };

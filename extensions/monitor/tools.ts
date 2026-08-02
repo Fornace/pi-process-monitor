@@ -133,7 +133,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
   pi.registerTool({
     name: "monitor_gc", label: "Monitor GC", description: "Checkpoint logical state and clean stale external leases. Dry-run by default.",
     parameters: Type.Object({ apply: Type.Optional(Type.Boolean({ default: false })) }), async execute(_id, params) {
-      const plan = await planExternalGc(runtime.getStateRoot());
+      const plan = await planExternalGc(runtime.getStateRoot(), Boolean(params.apply));
       let removedDirectories = 0;
       if (params.apply) { await runtime.checkpoint(); removedDirectories = await applyEmptyDirectoryGc(plan); }
       return { ...text(`monitor gc ${params.apply ? "applied" : "dry-run"}: scanned=${plan.scanned} live=${plan.live.length} stale=${plan.stale.length} corrupt=${plan.corrupt.length} emptyDirs=${plan.emptyDirectories.length} removedDirs=${removedDirectories}`), details: { plan, applied: Boolean(params.apply), removedDirectories } };

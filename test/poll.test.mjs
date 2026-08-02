@@ -15,9 +15,13 @@ function watcher(command, overrides = {}) {
 
 const normal = async (ownedChildren) => ({ level: "normal", sampledAt: new Date().toISOString(), ownedChildren, reasons: ["normal"] });
 
-test("poll ticks never overlap", async () => {
+test("poll ticks never overlap even while async pressure sampling is pending", async () => {
   const w = watcher("sleep 0.2");
-  const controller = startPollRuntime({ watcher: w, command: w.config.command, matcher: () => false, push: () => {}, onFailure: () => {}, onCriticalPressure: () => {}, ownedChildren: () => 0, pressureSample: normal });
+  let samples = 0;
+  const slowPressure = async (ownedChildren) => { samples++; await wait(50); return normal(ownedChildren); };
+  const controller = startPollRuntime({ watcher: w, command: w.config.command, matcher: () => false, push: () => {}, onFailure: () => {}, onCriticalPressure: () => {}, ownedChildren: () => 0, pressureSample: slowPressure });
+  await Promise.all([controller.tickNow(), controller.tickNow(), controller.tickNow()]);
+  assert.equal(samples, 1);
   await wait(20);
   const firstPid = w.child?.pid;
   await Promise.all([controller.tickNow(), controller.tickNow(), controller.tickNow()]);
