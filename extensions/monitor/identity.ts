@@ -165,12 +165,12 @@ export function classifyPoll(config: WatcherConfig): SafetyDecision {
     return { classification: nestedSafety.classification === "safe-observer" ? "safe-observer" : "ambiguous", local: false, reasons: [`remote ssh probe ${host}`, ...nestedSafety.reasons] };
   }
   const reasons: string[] = [];
-  if (tokens.some((token) => [";", "&&", "||", "&", ">", ">>", "<", "<<", "|&"].includes(token))) reasons.push("mutation/compound/background shell operator");
+  if (tokens.some((token) => ["&", ">", ">>", "<", "<<", "|&"].includes(token))) reasons.push("mutation/background shell operator");
   const segmentExecutables = tokens.filter((token, index) => index === 0 || SHELL_OPERATORS.has(tokens[index - 1]!))
     .map((token) => token.replace(/^['"]|['"]$/g, "").split("/").pop()?.toLowerCase() ?? "");
   if (segmentExecutables.some((name) => WORKLOAD_EXECUTABLES.has(name))) reasons.push(`workload executable ${segmentExecutables.find((name) => WORKLOAD_EXECUTABLES.has(name))}`);
   if (WORKLOAD_EXECUTABLES.has(executable) && !reasons.some((reason) => reason.startsWith("workload executable"))) reasons.push(`workload executable ${executable}`);
-  if (tokens.some((token) => WORKLOAD_VERBS.has(token.toLowerCase()))) reasons.push("workload verb");
+  if (tokens.some((token) => WORKLOAD_VERBS.has(token.toLowerCase())) && segmentExecutables.some((name) => WORKLOAD_EXECUTABLES.has(name))) reasons.push("workload verb");
   if (reasons.length) return { classification: "unsafe-shell", local: true, reasons };
   if (OBSERVER_EXECUTABLES.has(executable)) return { classification: "safe-observer", local: true, reasons: [`observer executable ${executable}`] };
   return { classification: "ambiguous", local: true, reasons: ["unrecognized local shell command"] };

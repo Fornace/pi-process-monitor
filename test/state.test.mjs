@@ -41,6 +41,7 @@ test("classifier preserves remote observer and rejects local workload poll", () 
   assert.equal(unsafeRemote.local, false);
   assert.equal(unsafeRemote.classification, "unsafe-shell");
   assert.equal(classifyPoll({ ...baseConfig, command: "test ! -f /tmp/done && python train.py" }).classification, "unsafe-shell");
+  assert.equal(classifyPoll({ ...baseConfig, command: "tail -n5 log; pgrep -fc train" }).classification, "safe-observer");
   const unsafe = classifyPoll({ ...baseConfig, command: "python train.py > out.log &" });
   assert.equal(unsafe.classification, "unsafe-shell");
   assert.match(unsafe.reasons.join(" "), /workload|operator/);
