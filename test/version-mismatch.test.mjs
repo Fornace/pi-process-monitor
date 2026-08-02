@@ -17,6 +17,13 @@ test("repository and effective installed monitor versions are captured", () => {
   assert.match(installedPackage.version, /^1\.[12]\.0$/);
 });
 
+test("brief-specified installed 1.2.0 fixture reproduces getEntries append-on-resume", async () => {
+  const source = await readFile(resolve("test/fixtures/legacy-installed-monitor.ts"), "utf8");
+  assert.match(source, /installedVersion = "1\.2\.0"/);
+  assert.match(source, /getEntries\(\)/);
+  assert.match(source, /appendEntry\("monitor-watcher"/);
+});
+
 test("legacy installed package retains unsafe append-on-resume implementation shape", async () => {
   const source = await readFile(resolve(installedPackagePath, "..", "extensions", "monitor.ts"), "utf8");
   assert.match(source, /getEntries\(\)/);
