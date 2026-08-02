@@ -102,6 +102,8 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
       });
       watcher.child = active.child;
       watcher.receipt = active.receipt;
+      watcher.receipts.push(active.receipt);
+      if (watcher.receipts.length > 100) watcher.receipts.shift();
       timeout = clock.setTimeout(() => {
         const owned = active;
         if (!owned) return;

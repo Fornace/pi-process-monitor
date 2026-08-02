@@ -26,6 +26,7 @@ export function watcherMeta(watcher: RuntimeWatcher) {
     eventCount: watcher.eventCount,
     consecutiveFailures: watcher.consecutiveFailures,
     receipt: watcher.receipt,
+    receipts: watcher.receipts,
     foreignOwner: watcher.foreignOwner,
   };
 }

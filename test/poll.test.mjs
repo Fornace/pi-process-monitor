@@ -9,7 +9,7 @@ function watcher(command, overrides = {}) {
     logicalId: "poll-test", handleId: "polltest", label: "", mode: "poll", state: "claimed",
     config: { command, intervalSeconds: 2, pollTimeoutSeconds: 0.05, maxConsecutiveFailures: 2, backoffMaxSeconds: 4, cwd: "/tmp", recoveryPolicy: "safe-auto", reuse: "return-existing", ...overrides },
     sourceFingerprint: "f", revision: 2, createdAt: Date.now(), lastEventAt: null,
-    lastTickAt: null, eventCount: 0, consecutiveFailures: 0, owner: { ownerEpoch: "epoch" }, stop: async () => {},
+    lastTickAt: null, eventCount: 0, consecutiveFailures: 0, receipts: [], owner: { ownerEpoch: "epoch" }, stop: async () => {},
   };
 }
 

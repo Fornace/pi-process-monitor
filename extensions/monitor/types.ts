@@ -156,6 +156,7 @@ export interface RuntimeWatcher {
   nextTickAt?: number;
   owner?: OwnerRecord;
   receipt?: ProcessReceipt;
+  receipts: ProcessReceipt[];
   child?: ChildProcess;
   foreignOwner?: boolean;
   stop: (intent?: "stop" | "release" | "expire" | "quarantine") => Promise<void>;

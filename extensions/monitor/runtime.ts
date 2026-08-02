@@ -153,7 +153,7 @@ export class MonitorRuntime {
       logicalId: id, handleId: shortHandle(id), label: config.label ?? "", mode,
       state: previous?.state ?? "created", config, sourceFingerprint: fingerprint,
       revision: previous?.revision ?? 0, createdAt: Date.parse(previous?.createdAt ?? "") || Date.now(),
-      lastEventAt: null, lastTickAt: null, eventCount: 0, consecutiveFailures: 0,
+      lastEventAt: null, lastTickAt: null, eventCount: 0, consecutiveFailures: 0, receipts: [],
       stop: async () => {},
     };
   }
