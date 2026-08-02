@@ -28,6 +28,7 @@ export class MonitorRuntime {
   private fuse: FuseDecision = { quarantineLocalPolls: false, disableAllLocalRecovery: false, recent10m: 0, recent30m: 0 };
   private snapshots = new Map<string, WatcherSnapshot>();
   private stateEvents = 0;
+  private cleanSessionStart = false;
 
   private pi: ExtensionAPI;
 
@@ -242,11 +243,18 @@ export class MonitorRuntime {
     this.shuttingDown = false;
     this.sessionId = ctx.sessionManager.getSessionId?.() ?? "ephemeral";
     const history = recordRuntimeStart(this.stateRoot, this.sessionId);
+    this.cleanSessionStart = Boolean(history.cleanShutdownAt && history.runtimeStartedAt
+      && Date.parse(history.cleanShutdownAt) >= Date.parse(history.runtimeStartedAt));
     this.fuse = evaluateFuse(history);
     const reduced = reduceState(ctx.sessionManager.getBranch() as SessionEntryLike[]);
     this.snapshots = reduced.watchers;
     const summary = { resumed: 0, reused: 0, expired: 0, quarantined: 0, compacted: reduced.ignored };
     for (const snapshot of reduced.watchers.values()) {
+      if (snapshot.state === "claimed" && !this.cleanSessionStart && snapshot.config
+        && snapshot.mode === "poll" && classifyPoll(snapshot.config).local) {
+        snapshot.recoveryPolicy = "confirm";
+        snapshot.config = snapshot.config ? { ...snapshot.config, recoveryPolicy: snapshot.recoveryPolicy } : snapshot.config;
+      }
       if (["stopped", "expired"].includes(snapshot.state)) { if (snapshot.state === "expired") summary.expired++; continue; }
       if (snapshot.recoveryPolicy === "never" || !snapshot.config) continue;
       const result = await this.launch(snapshot.config, snapshot);
