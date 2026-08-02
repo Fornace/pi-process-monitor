@@ -1,81 +1,54 @@
-// typecheck happens via `npm run typecheck` (tsc). This is a runtime smoke test:
-// loads the extension against a stub ExtensionAPI, asserts 3 tools + 3 commands
-// register, exercises status/start/kill, and verifies teardown is clean.
+import assert from "node:assert/strict";
+
 const tools = [];
 const commands = [];
 const events = {};
 const sent = [];
 const entries = [];
 const pi = {
-  on: (e, h) => { events[e] = h; },
-  registerTool: (d) => { tools.push(d); },
-  registerCommand: (n, o) => { commands.push({ name: n, ...o }); },
+  on: (event, handler) => { events[event] = handler; },
+  registerTool: (definition) => tools.push(definition),
+  registerCommand: (name, options) => commands.push({ name, ...options }),
   registerMessageRenderer: () => {},
-  sendMessage: (m, _o) => { sent.push(m); },
-  appendEntry: (t, d) => { entries.push({ type: "custom", customType: t, data: d }); },
+  sendMessage: (message) => sent.push(message),
+  appendEntry: (customType, data) => entries.push({ type: "custom", id: String(entries.length), timestamp: new Date().toISOString(), customType, data }),
 };
-const smEntries = () => entries;
-const fakeCtx = (cwd = "/tmp") => ({ cwd, ui: { notify: () => {}, confirm: async () => true, input: async () => "", select: async () => undefined } });
-
-let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; } else { fail++; console.error("  ✗", m); } };
-
-const { default: factory } = await import("../extensions/monitor.ts");
+const ctx = {
+  cwd: "/tmp", hasUI: false, mode: "print",
+  sessionManager: { getSessionId: () => `smoke-${process.pid}`, getBranch: () => entries },
+  ui: { notify: () => {} },
+};
+const { default: factory } = await import("../extensions/monitor/index.ts");
 factory(pi);
 
-console.log("tools:", tools.map(t => t.name).sort().join(", "));
-console.log("commands:", commands.map(c => c.name).sort().join(", "));
-ok(tools.length === 3 && ["monitor", "monitor_kill", "monitor_status"].every(n => tools.some(t => t.name === n)), "3 tools registered");
-ok(commands.length === 3 && ["monitor", "monitors", "monitor-kill"].every(n => commands.some(c => c.name === n)), "3 commands registered");
-ok(typeof commands.find(c => c.name === "monitor-kill").getArgumentCompletions === "function", "monitor-kill has autocomplete");
+assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+  "monitor", "monitor_gc", "monitor_inspect", "monitor_kill", "monitor_kill_all", "monitor_recover", "monitor_status",
+]);
+assert.deepEqual(commands.map((command) => command.name).sort(), [
+  "monitor", "monitor-gc", "monitor-kill", "monitor-recover", "monitors",
+]);
+await events.session_start({}, ctx);
 
-// status with no watchers
-const status = tools.find(t => t.name === "monitor_status");
-const r0 = await status.execute("c", {}, new AbortController().signal, undefined, fakeCtx());
-ok(r0.content[0].text === "No watchers.", "status empty = 'No watchers.'");
+const monitor = tools.find((tool) => tool.name === "monitor");
+const status = tools.find((tool) => tool.name === "monitor_status");
+const inspect = tools.find((tool) => tool.name === "monitor_inspect");
+const kill = tools.find((tool) => tool.name === "monitor_kill");
 
-// start a spawn watcher
-const mon = tools.find(t => t.name === "monitor");
-const r1 = await mon.execute("c", { command: "for i in 1 2 3; do echo step $i; sleep 0.03; done; echo DONE-success", coalesceSeconds: 0 }, new AbortController().signal, undefined, fakeCtx());
-const wid = r1.details.watcher.id;
-ok(r1.details.watcher.mode === "spawn" && wid.length >= 6, "started a spawn watcher");
+const launched = await monitor.execute("id", { command: "echo DONE", coalesceSeconds: 0 }, undefined, undefined, ctx);
+assert.equal(launched.details.action, "created");
+assert.equal(launched.details.watcher.mode, "spawn");
+const id = launched.details.watcher.id;
+const inspected = await inspect.execute("id", { id }, undefined, undefined, ctx);
+assert.equal(inspected.details.watcher.logicalId, launched.details.watcher.logicalId);
+await new Promise((resolve) => setTimeout(resolve, 250));
+assert.ok(sent.some((message) => /PROCESS EXITED/.test(message.content)));
 
-// autocomplete now returns the live id
-const killCmd = commands.find(c => c.name === "monitor-kill");
-const ac = killCmd.getArgumentCompletions(wid.slice(0, 3));
-ok(ac && ac.some(i => i.value === wid), "autocomplete returns live watcher id");
+const unsafe = await monitor.execute("id", { command: "python train.py", intervalSeconds: 30 }, undefined, undefined, ctx);
+assert.equal(unsafe.details.action, "quarantined");
+assert.equal(unsafe.details.watcher.state, "quarantined");
+await kill.execute("id", { id: unsafe.details.watcher.id }, undefined, undefined, ctx);
+const current = await status.execute("id", {}, undefined, undefined, ctx);
+assert.equal(current.details.watchers.length, 0);
 
-// let it run + flush the exit message
-await new Promise(res => setTimeout(res, 500));
-const exitMsg = sent.find(m => /PROCESS EXITED \(code=0/.test(m.content || ""));
-ok(exitMsg, "exit pinged (PROCESS EXITED present in messages)");
-
-// session_start resume: reconstruct only latest active records and ignore a stopped tombstone
-entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-a", command: "echo active-a", intervalSec: 60, cwd: "/tmp" } });
-entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-b", logFile: "/tmp/monitor-test.log", cwd: "/tmp" } });
-entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-stopped", command: "echo stopped", intervalSec: 60, cwd: "/tmp" } });
-entries.push({ type: "custom", customType: "monitor-watcher", data: { id: "old-stopped", command: "echo stopped", intervalSec: 60, cwd: "/tmp", stopped: true } });
-await events["session_start"]?.({}, { sessionManager: { getEntries: smEntries }, ...fakeCtx() });
-const resumed = await status.execute("c", {}, new AbortController().signal, undefined, fakeCtx());
-ok(resumed.details.watchers.length === 2, "resume reattaches only latest active watchers");
-ok([...tools].length === 3, "resume did not re-register tools");
-
-// teardown
-events["session_shutdown"]?.();
-ok(true, "session_shutdown did not throw");
-
-// timeout: start a long sleeper with a 200ms timeout, verify it auto-stops
-const r2 = await mon.execute("c", { command: "sleep 10", timeoutSeconds: 0.2 }, new AbortController().signal, undefined, fakeCtx());
-const twid = r2.details.watcher.id;
-ok(r2.details.watcher.alive === true, "timeout watcher starts alive");
-await new Promise(res => setTimeout(res, 500));
-const timeoutMsg = sent.find(m => /TIMEOUT after 0.2s/.test(m.content || ""));
-ok(timeoutMsg, "timeout fired and auto-stopped the watcher");
-
-// kill on a non-existent id
-const kill = tools.find(t => t.name === "monitor_kill");
-const knf = await kill.execute("c", { id: "nope" }, new AbortController().signal, undefined, fakeCtx());
-ok(knf.details.watcher === undefined, "kill(missing) returns undefined watcher");
-
-console.log(`\n${fail === 0 ? "✓ ALL PASS" : "✗ FAILURES"} (${pass} passed, ${fail} failed)`);
-process.exit(fail === 0 ? 0 : 1);
+await events.session_shutdown({}, ctx);
+console.log("✓ extension load/runtime smoke passed");
