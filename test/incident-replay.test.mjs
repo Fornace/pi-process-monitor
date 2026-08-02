@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { reduceState } from "../extensions/monitor/state.ts";
@@ -34,6 +38,23 @@ test("100 unchanged recovery reductions launch no local workload and grow no jou
     // Pure reduction never appends: caller sees the same active branch on every crash boundary.
     assert.equal(source.length, fixture.length);
   }
+});
+
+test("100 fresh Node runtime reconstructions converge through checkpoint boundaries", () => {
+  const root = mkdtempSync(join(tmpdir(), "monitor-restarts-"));
+  const input = join(root, "entries.json");
+  const output = join(root, "result.json");
+  const worker = new URL("./fixtures/restart-worker.mjs", import.meta.url).pathname;
+  try {
+    writeFileSync(input, JSON.stringify(fixture));
+    for (let cycle = 0; cycle < 100; cycle++) {
+      execFileSync(process.execPath, [worker, input, output]);
+      const result = JSON.parse(readFileSync(output, "utf8"));
+      assert.equal(result.active, 2);
+      assert.equal(result.total, 3);
+      assert.ok(result.checkpoint.active.length <= 2);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("abandoned branch incident records cannot resurrect", () => {
