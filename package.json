@@ -59,7 +59,7 @@
     "test:smoke": "node test/load.mjs",
     "test:real-pi": "node test/real-pi.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "validate": "npm run typecheck && npm test && npm run test:smoke && MONITOR_TEST_PROVIDER=${MONITOR_TEST_PROVIDER:-fornace} MONITOR_TEST_MODEL=${MONITOR_TEST_MODEL:-fornace-max} npm run test:real-pi && npm pack --dry-run --json >/dev/null",
+    "validate": "npm run typecheck && npm test && npm run test:smoke && npm run test:real-pi && npm pack --dry-run --json >/dev/null",
     "prepublishOnly": "npm run validate"
   },
   "devDependencies": {
