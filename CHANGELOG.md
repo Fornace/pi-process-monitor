@@ -2,7 +2,17 @@
 
 All notable changes to `pi-process-monitor` are documented here.
 
-## [2.0.0] — unreleased
+## [2.0.1] - 2026-08-12
+
+### Fixed
+
+- Kept the monitor tool's empty root `required` list explicit so OpenAI-compatible schema normalizers preserve optional arguments.
+- Replaced nested `anyOf` probe schemas with one portable object schema whose only universal requirement is `type`.
+- Added argument preparation that removes empty generated source placeholders when one real `command`, `logFile`, or `probe` source is present.
+- Added schema and argument-normalization regression coverage for spawn, file-tail, and structured-probe calls, plus a real Pi provider smoke test.
+- Made environment-specific legacy-install assertions conditional so clean checkouts pass validation.
+
+## [2.0.0] - 2026-08-02
 
 ### Crash-safe identity and recovery
 
@@ -38,21 +48,21 @@ All notable changes to `pi-process-monitor` are documented here.
 - Local poll recovery no longer silently auto-resumes. It defaults to `confirm` and unsafe/ambiguous shell polling is quarantined.
 - The package therefore requires a major release rather than a compatible minor.
 
-## [1.3.0] — 2026-07-25
+## [1.3.0] - 2026-07-25
 
 ### Fixed
 
 - Idempotent watcher teardown and in-process deduplication.
 - Persisted stop tombstones and clean-shutdown resource release.
 
-## [1.2.0] — 2026-07-13
+## [1.2.0] - 2026-07-13
 
 - Added relative `timeoutSeconds` watcher auto-stop.
 
-## [1.1.0] — 2026-06-29
+## [1.1.0] - 2026-06-29
 
 - Added gallery preview metadata.
 
-## [1.0.0] — 2026-06-29
+## [1.0.0] - 2026-06-29
 
 - Initial `pi-process-monitor` release.

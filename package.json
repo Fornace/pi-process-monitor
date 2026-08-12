@@ -1,7 +1,7 @@
 {
   "name": "pi-process-monitor",
-  "version": "2.0.0",
-  "description": "Non-blocking background watcher for pi — start a process, SSH poll, or log tail and get pinged in-session on milestones, failure, or exit. Claude Code's Monitor tool, with conditional delivery.",
+  "version": "2.0.1",
+  "description": "Non-blocking background watcher for pi: start a process, SSH poll, or log tail and get pinged in-session on milestones, failure, or exit. Claude Code's Monitor tool, with conditional delivery.",
   "type": "module",
   "license": "MIT",
   "author": "Francesco Frapporti <effedue@gmail.com>",
@@ -57,8 +57,9 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:smoke": "node test/load.mjs",
+    "test:real-pi": "node test/real-pi.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "validate": "npm run typecheck && npm test && npm run test:smoke && npm pack --dry-run --json >/dev/null",
+    "validate": "npm run typecheck && npm test && npm run test:smoke && MONITOR_TEST_PROVIDER=${MONITOR_TEST_PROVIDER:-fornace} MONITOR_TEST_MODEL=${MONITOR_TEST_MODEL:-fornace-max} npm run test:real-pi && npm pack --dry-run --json >/dev/null",
     "prepublishOnly": "npm run validate"
   },
   "devDependencies": {
@@ -69,8 +70,8 @@
     "typescript": "^5.6.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-ai": ">=0.74.0",
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
   },
   "engines": {
     "node": ">=20"

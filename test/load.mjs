@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Value } from "typebox/value";
 
 const tools = [];
 const commands = [];
@@ -34,6 +35,38 @@ const status = tools.find((tool) => tool.name === "monitor_status");
 const inspect = tools.find((tool) => tool.name === "monitor_inspect");
 const kill = tools.find((tool) => tool.name === "monitor_kill");
 
+assert.deepEqual(monitor.parameters.required, []);
+assert.equal(monitor.parameters.additionalProperties, false);
+assert.equal(monitor.parameters.properties.probe.anyOf.length, 4);
+assert.equal(Value.Check(monitor.parameters, { command: "echo DONE" }), true);
+assert.equal(Value.Check(monitor.parameters, { logFile: "/tmp/job.log" }), true);
+assert.equal(Value.Check(monitor.parameters, { probe: { type: "file", path: "/tmp/job.log" } }), true);
+assert.equal(Value.Check(monitor.parameters, { probe: { type: "ssh", host: "h", command: "tail -f x" } }), true);
+assert.equal(Value.Check(monitor.parameters, { probe: { type: "file" } }), false);
+assert.equal(Value.Check(monitor.parameters, { probe: { type: "ssh", host: "h" } }), false);
+assert.equal(Value.Check(monitor.parameters, { command: "" }), true);
+assert.deepEqual(monitor.prepareArguments({ command: "echo DONE", logFile: "", probe: null }), { command: "echo DONE" });
+assert.deepEqual(
+  monitor.prepareArguments({ command: "echo DONE", cwd: "", expiresAt: "", reuseKey: "" }),
+  { command: "echo DONE" },
+);
+assert.deepEqual(
+  monitor.prepareArguments({ command: "echo DONE", probe: { type: "file", path: "", tailLines: 1 } }),
+  { command: "echo DONE" },
+);
+assert.deepEqual(
+  monitor.prepareArguments({ probe: { type: "process", pidFile: "", match: "" }, intervalSeconds: 2 }),
+  { probe: { type: "process", pidFile: "", match: "" }, intervalSeconds: 2 },
+);
+assert.deepEqual(
+  monitor.prepareArguments({ command: "echo DONE", logFile: "/tmp/job.log" }),
+  { command: "echo DONE", logFile: "/tmp/job.log" },
+);
+assert.deepEqual(
+  monitor.prepareArguments({ probe: { type: "file", path: "/tmp/job.log", tailLines: 5 } }),
+  { probe: { type: "file", path: "/tmp/job.log", tailLines: 5 } },
+);
+
 const launched = await monitor.execute("id", { command: "echo DONE", coalesceSeconds: 0 }, undefined, undefined, ctx);
 assert.equal(launched.details.action, "created");
 assert.equal(launched.details.watcher.mode, "spawn");
@@ -46,6 +79,14 @@ assert.ok(sent.some((message) => /PROCESS EXITED/.test(message.content)));
 const unsafe = await monitor.execute("id", { command: "python train.py", intervalSeconds: 30 }, undefined, undefined, ctx);
 assert.equal(unsafe.details.action, "quarantined");
 assert.equal(unsafe.details.watcher.state, "quarantined");
+await assert.rejects(
+  monitor.execute("id", { command: "echo one", logFile: "/tmp/two" }, undefined, undefined, ctx),
+  /provide exactly one source/,
+);
+await assert.rejects(
+  monitor.execute("id", {}, undefined, undefined, ctx),
+  /provide exactly one source/,
+);
 await kill.execute("id", { id: unsafe.details.watcher.id }, undefined, undefined, ctx);
 const current = await status.execute("id", {}, undefined, undefined, ctx);
 assert.equal(current.details.watchers.length, 0);
