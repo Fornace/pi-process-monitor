@@ -1,21 +1,30 @@
 # Publishing pi-process-monitor
 
-This package publishes to npm from GitHub Actions on tag push. Two publish
-modes are supported: classic token (works now) and provenance (recommended
-once configured). Both require a one-time setup by Francesco on npmjs.com.
+This package publishes to npm from GitHub Actions on tag push using **trusted
+publishing (OIDC)**. No long-lived npm token is needed: npm exchanges the
+short-lived GitHub OIDC token for publish access, and provenance attestations
+are generated automatically. This is the durable answer to npm's
+2FA-token restrictions (Automation/2FA-bypass tokens stop skipping 2FA for
+account actions in early August 2026 and lose direct publishing around
+January 2027; see the
+[GitHub changelog](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/)).
 
-## Option A: classic token (fastest, works today)
+One-time setup is required by Francesco on npmjs.com (2 minutes).
 
-1. Generate a **Publish** or **Automation** token at
-   <https://www.npmjs.com/settings/ffrappo/tokens>. (Read the npm banner about
-   2FA-bypassing tokens being restricted: prefer **Publish**.)
-2. Add it as the repo secret (one-time):
+## Option B (recommended): trusted publishing (OIDC), no token
 
-   ```bash
-   gh secret set NPM_TOKEN --repo Fornace/pi-process-monitor
-   ```
-
-3. Publish by pushing a tag or dispatching the workflow:
+1. On https://www.npmjs.com/package/pi-process-monitor open **Settings** and
+   find the **Trusted Publisher** section.
+2. Under "Select your publisher", click **GitHub Actions** and configure:
+   - Organization or user: `Fornace`
+   - Repository: `pi-process-monitor`
+   - Workflow filename: `publish.yml` (filename only, must exist in
+     `.github/workflows/`)
+   - Environment name: leave blank
+   - Allowed actions: `npm publish`
+3. Save. npm does not verify the configuration until the first publish, so
+   double-check the workflow filename.
+4. Publish by pushing a tag or dispatching the workflow:
 
    ```bash
    git tag -a v<x.y.z> -m "..."
@@ -25,32 +34,30 @@ once configured). Both require a one-time setup by Francesco on npmjs.com.
    ```
 
 The workflow (`.github/workflows/publish.yml`) runs typecheck, the full test
-suite, smoke, and a pack dry-run before `npm publish --access public`.
+suite, smoke, and a pack dry-run before `npm publish --access public`. The
+`id-token: write` permission is required and already set.
 
-## Option B: npm provenance (recommended, no long-lived token)
+Optionally, after the first successful trusted publish, restrict publishing
+access to tokens (Settings -> Publishing access -> "Require two-factor
+authentication and disallow tokens") for maximum security.
 
-npm provenance signing uses GitHub OIDC, so no `NPM_TOKEN` secret is needed
-once the trusted-publisher link is configured. This is the durable answer to
-npm's 2FA-token restrictions (Automation tokens that bypass 2FA are being
-phased out for publishing from January 2027).
+## Option A (legacy): classic token (deprecated, avoid)
 
-1. On npmjs.com, open the package settings and add a trusted publisher:
-   - Organization/owner: `Fornace`
-   - Repository: `pi-process-monitor`
-   - Workflow filename: `publish.yml`
-   - Environment: leave blank or set `release`
-2. Replace the workflow's `Publish` step with the provenance form (requires
-   `id-token: write` permission and `NODE_AUTH_TOKEN` removed):
+npm is phasing out token-based publishing for accounts with 2FA. A classic
+Publish/Automation token, if used, requires a human OTP per publish and
+2FA-bypass tokens stop working for direct publishing in January 2027. Prefer
+Option B. If you still need a token for legacy tooling:
 
-   ```yaml
-   - name: Publish
-     run: npm publish --access public --provenance
+1. Generate a token at <https://www.npmjs.com/settings/ffrappo/tokens>.
+2. Add it as the repo secret (one-time):
+
+   ```bash
+   gh secret set NPM_TOKEN --repo Fornace/pi-process-monitor
    ```
 
-3. Drop the `NPM_TOKEN` secret once provenance is verified.
-
-See <https://docs.npmjs.com/generating-provenance-statements> for the current
-npm-side steps before configuring.
+3. The workflow ignores it when OIDC is configured; keep it only for
+   non-OIDC webhooks. The workflow's Publish step no longer reads
+   `NODE_AUTH_TOKEN`.
 
 ## Verifying a publish
 

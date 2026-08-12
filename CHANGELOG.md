@@ -12,6 +12,10 @@ All notable changes to `pi-process-monitor` are documented here.
 - Added schema and argument-normalization regression coverage for spawn, file-tail, and structured-probe calls, plus a real Pi provider smoke test.
 - Made environment-specific legacy-install assertions conditional so clean checkouts pass validation.
 
+### Changed
+
+- Publication now uses npm trusted publishing (OIDC) instead of a long-lived `NPM_TOKEN`: the workflow sets `id-token: write` and publishes without `NODE_AUTH_TOKEN`, matching npm's deprecation of 2FA-bypass tokens (account actions restricted August 2026, direct publishing ending January 2027). See `docs/PUBLISH.md`.
+
 ## [2.0.0] - 2026-08-02
 
 ### Crash-safe identity and recovery
