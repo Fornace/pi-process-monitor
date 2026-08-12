@@ -23,7 +23,8 @@ Use monitor when work may exceed 10 seconds and the user must keep working. It d
 1. Call `monitor_status`, or use the default `reuse: "return-existing"`.
 2. Use narrow identity: PID file, exact log path, workflow/run ID, or remote job ID. Do not broadly match `python`, `swift`, or unrelated process names.
 3. Give temporary observers an absolute `expiresAt`.
-4. Pick recovery deliberately:
+4. Provide exactly one source: `command`, `logFile`, or `probe`. Omit the other two fields entirely. Empty strings and placeholder probe objects still count as additional sources and are rejected.
+5. Pick recovery deliberately:
    - spawn: `never`;
    - file/remote structured observer: `safe-auto`;
    - local poll: `confirm`.
