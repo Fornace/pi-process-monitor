@@ -26,7 +26,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
           cache: npm
 
@@ -38,9 +38,13 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          NODE_OPTIONS: "--experimental-strip-types"
 
       - name: Smoke
         run: npm run test:smoke
+        env:
+          NODE_OPTIONS: "--experimental-strip-types"
 
       - name: Pack check
         run: npm pack --dry-run --json >/dev/null
