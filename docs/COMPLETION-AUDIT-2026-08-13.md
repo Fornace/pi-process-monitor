@@ -125,15 +125,25 @@ strict-compatible nullable source shape. Result: `isError=false`, runtime mode
 `spawn`, clean exit ping. This proves the nullable JSON Schema survives Pi's
 current Gemini `parametersJsonSchema` transport.
 
-## Release gate
+## Release evidence
 
-Required before publication:
+Completed before publication:
 
 ```bash
-npm run validate
+MONITOR_TEST_PROVIDER=fornace MONITOR_TEST_MODEL=fornace-max npm run validate
 npm pack --dry-run --json
 ```
 
+Results:
+
+- Commit/tag artifact: `2ddf234`, `v2.0.2`.
+- GitHub Actions OIDC run `31698950484`: success through Publish.
+- npm `latest`: `2.0.2`.
+- Registry integrity: `sha512-cTZhkqOP9q6w8e3F5PdJ0CrIeiqyhtl/Y4wR5N+GVR1DcuDsBaudg021g8uK5xvzNfNLt72cH7thivpnsEVm7A==`.
+- Registry artifact live Pi call: exactly one `monitor` call, mode `spawn`, clean exit ping.
+- SLSA provenance: published to Sigstore transparency log index `2450856931`.
+- GitHub release: https://github.com/Fornace/pi-process-monitor/releases/tag/v2.0.2
+
 The GitHub workflow uses Node 24, npm 11.5.1+, `id-token: write`, and no
-long-lived publish token. The npm package's trusted publisher must be configured
-for `Fornace/pi-process-monitor`, workflow `publish.yml`, action `npm publish`.
+long-lived publish token. The trusted publisher is configured for
+`Fornace/pi-process-monitor`, workflow `publish.yml`, action `npm publish`.
