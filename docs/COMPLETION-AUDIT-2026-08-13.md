@@ -144,6 +144,23 @@ Results:
 - SLSA provenance: published to Sigstore transparency log index `2450856931`.
 - GitHub release: https://github.com/Fornace/pi-process-monitor/releases/tag/v2.0.2
 
+## Credential hygiene
+
+The temporary granular package-write token pasted during release was not used
+for publication; OIDC published 2.0.2. After verifying trusted publishing:
+
+- `~/.npmrc` and `~/.agent_credentials/tokens/npm.env` were scrubbed and left
+  mode `0600` with an OIDC-only comment;
+- `npm whoami` now returns `ENEEDAUTH`, proving no local write credential remains;
+- backups contain only the older expired token, not the exposed token;
+- npm CLI 11.16.0 could not revoke the GAT because the registry masks its key as
+  `***`; direct self-revocation returned 401 because package-write tokens lack
+  account-token-management authority.
+
+The npm web token named `ffrappo-publish` (created 2026-08-12, package write,
+no 2FA bypass) must be revoked through npmjs.com. It is unnecessary for future
+publishes.
+
 The GitHub workflow uses Node 24, npm 11.5.1+, `id-token: write`, and no
 long-lived publish token. The trusted publisher is configured for
 `Fornace/pi-process-monitor`, workflow `publish.yml`, action `npm publish`.
