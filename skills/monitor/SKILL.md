@@ -31,6 +31,7 @@ Legacy top-level `command`, `logFile`, and `probe` calls remain accepted through
 - **Spawn mode owns a local workload once.** Use `{ "source": { "type": "spawn", "command": "npm test" }, "options": null }`.
 - **Poll mode only observes independently owned durable work.** Never put training, conversion, build, test, generation, package installation, mutation, output redirection, backgrounding, or “start if missing” logic in a poll command.
 - Prefer structured `process`, `file`, `ssh`, and `http` sources to raw shell polling.
+- If the user asks you to stop using monitor, stop immediately and continue with direct execution. Do not retry the tool with alternative argument shapes.
 - Long-running retryable computation belongs in CI, Restate, Trigger.dev, or another workflow engine; monitor observes it.
 - Never combine a monitor-launched job with blocking bash retries of the same job.
 
