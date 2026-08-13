@@ -1,9 +1,10 @@
-import { Type, type Static } from "typebox";
+import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { applyEmptyDirectoryGc, planExternalGc } from "./gc.ts";
+import { monitorParams, prepareMonitorArguments, resolveMonitorInput, type MonitorParams } from "./input.ts";
 import type { MonitorRuntime } from "./runtime.ts";
-import type { RuntimeWatcher, WatcherConfig, WatcherMode } from "./types.ts";
+import type { RuntimeWatcher } from "./types.ts";
 
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
@@ -31,104 +32,32 @@ export function watcherMeta(watcher: RuntimeWatcher) {
   };
 }
 
-const probeSchema = Type.Union([
-  Type.Object({ type: Type.Literal("process"), pidFile: Type.Optional(Type.String()), match: Type.Optional(Type.String()) }),
-  Type.Object({ type: Type.Literal("file"), path: Type.String(), tailLines: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })) }),
-  Type.Object({ type: Type.Literal("ssh"), host: Type.String(), command: Type.String() }),
-  Type.Object({ type: Type.Literal("http"), url: Type.String(), method: Type.Optional(StringEnum(["GET", "HEAD"] as const)) }),
-]);
-
-export const monitorParams = Type.Object({
-  command: Type.Optional(Type.String({ description: "SOURCE (choose exactly one). Shell command to spawn once. Omit intervalSeconds, logFile, and probe." })),
-  intervalSeconds: Type.Optional(Type.Number({ minimum: 2, description: "Poll cadence; enables poll mode." })),
-  logFile: Type.Optional(Type.String({ description: "SOURCE (choose exactly one). File to tail. Omit command and probe." })),
-  probe: Type.Optional(probeSchema),
-  notifyOn: Type.Optional(Type.Array(Type.String())),
-  heartbeatMinutes: Type.Optional(Type.Number({ minimum: 1 })),
-  label: Type.Optional(Type.String()),
-  coalesceSeconds: Type.Optional(Type.Number({ minimum: 0 })),
-  maxLines: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })),
-  cwd: Type.Optional(Type.String()),
-  timeoutSeconds: Type.Optional(Type.Number({ minimum: 0.1, description: "Compatibility lifetime converted once to absolute expiresAt." })),
-  expiresAt: Type.Optional(Type.String({ description: "Absolute ISO-8601 watcher expiry." })),
-  recoveryPolicy: Type.Optional(StringEnum(["never", "confirm", "safe-auto"] as const)),
-  reuse: Type.Optional(StringEnum(["return-existing", "replace", "parallel"] as const)),
-  reuseKey: Type.Optional(Type.String()),
-  pollTimeoutSeconds: Type.Optional(Type.Number({ minimum: 0.25 })),
-  maxConsecutiveFailures: Type.Optional(Type.Integer({ minimum: 1 })),
-  backoffMaxSeconds: Type.Optional(Type.Number({ minimum: 2 })),
-  safetyClass: Type.Optional(StringEnum(["auto", "observer", "unsafe-shell"] as const)),
-}, {
-  // Keep the empty list explicit. Some OpenAI-compatible schema normalizers
-  // treat an omitted root `required` keyword as if every property were required.
-  required: [],
-  additionalProperties: false,
-});
-type MonitorParams = Static<typeof monitorParams>;
-
-const sourceKeys = ["command", "logFile", "probe"] as const;
-const optionalKeys = Object.keys(monitorParams.properties).filter((key) => !sourceKeys.includes(key as typeof sourceKeys[number]));
-
-function prepareMonitorArguments(args: unknown): MonitorParams {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return args as MonitorParams;
-  const input = { ...(args as Record<string, unknown>) };
-  for (const key of optionalKeys) {
-    if (input[key] === "" || input[key] === null) delete input[key];
-  }
-  // Compatibility repair for clients that materialize optional schema fields.
-  // Preserve real conflicts so the exactly-one-source runtime guard still fails.
-  const populatedSources = sourceKeys.filter((key) => hasPopulatedSource(input[key]));
-  if (populatedSources.length === 1) {
-    for (const key of sourceKeys) {
-      if (key !== populatedSources[0] && isEmptySource(input[key])) delete input[key];
-    }
-  }
-  return input as MonitorParams;
-}
-
-function hasPopulatedSource(value: unknown): boolean {
-  return value !== undefined && !isEmptySource(value);
-}
-
-function isEmptySource(value: unknown): boolean {
-  if (value === "" || value === null) return true;
-  if (typeof value !== "object" || Array.isArray(value)) return false;
-  const fields = Object.entries(value).filter(([key]) => key !== "type" && !["tailLines", "method"].includes(key));
-  return fields.length === 0 || fields.every(([, field]) => field === "" || field === null || field === undefined);
-}
-
-function sourceCount(params: MonitorParams): number {
-  return sourceKeys.filter((key) => Boolean(params[key])).length;
-}
-
-function expiresAt(params: MonitorParams): string | undefined {
-  if (params.expiresAt) {
-    if (!Number.isFinite(Date.parse(params.expiresAt))) throw new Error("expiresAt must be a valid ISO timestamp");
-    return new Date(params.expiresAt).toISOString();
-  }
-  return params.timeoutSeconds ? new Date(Date.now() + params.timeoutSeconds * 1000).toISOString() : undefined;
-}
-
 export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
   pi.registerTool({
     name: "monitor", label: "Monitor",
-    description: "Start or exactly reuse a non-blocking watcher. Provide exactly one SOURCE field: command, logFile, or probe. Omit unused source fields completely. Local shell polls are quarantined unless explicitly acknowledged as observers.",
+    description: "Start or exactly reuse one non-blocking watcher. Select an explicit source.type: spawn, poll, tail, process, file, ssh, or http. source.type is authoritative; unrelated generated fields are ignored. Local shell polls are quarantined unless explicitly acknowledged as observers.",
     promptSnippet: "Watch an owned process or independent durable job without blocking",
     promptGuidelines: [
-      "Use monitor with exactly one source: command, logFile, or probe. Omit the other two fields instead of sending empty values.",
-      "Use monitor spawn for a local workload; use monitor poll only for a fast read-only probe of an independently owned job.",
-      "Call monitor_status before creating a watcher or use monitor reuse=return-existing; never duplicate a workload with blocking bash retries.",
-      "Use narrow PID, run, workflow, exact path, or remote job identity; set expiresAt for temporary watchers.",
+      "Use monitor with one explicit source object. Set source.type to spawn, poll, tail, process, file, ssh, or http; source.type is authoritative.",
+      "Use source.type=spawn for a local workload. Use source.type=poll only for a fast read-only shell observation; use process/file/ssh/http for structured observers.",
+      "Call monitor_status before creating a watcher or use options.reuse=return-existing; never duplicate a workload with blocking bash retries.",
+      "Use narrow PID, run, workflow, exact path, or remote job identity; set options.expiresAt for temporary watchers.",
     ],
     parameters: monitorParams,
     prepareArguments: prepareMonitorArguments,
     async execute(_id, params: MonitorParams, _signal, _update, ctx) {
-      if (sourceCount(params) !== 1) throw new Error("provide exactly one source: command, logFile, or probe");
-      const config = {
-        ...params, cwd: params.cwd ?? ctx.cwd, expiresAt: expiresAt(params),
-      } as Omit<WatcherConfig, "recoveryPolicy" | "reuse"> & Partial<Pick<WatcherConfig, "recoveryPolicy" | "reuse">>;
+      const { config, sourceType, ignoredSourceFields } = resolveMonitorInput(params, ctx.cwd);
       const result = await runtime.launch(config);
-      return { ...text(`${result.action.toUpperCase()}: watcher ${result.watcher.handleId} [${result.watcher.mode}] state=${result.watcher.state}${result.reason ? ` reason=${result.reason}` : ""}`), details: { action: result.action, watcher: watcherMeta(result.watcher) } };
+      const ignored = ignoredSourceFields.length
+        ? ` Ignored unrelated source fields for source.type=${sourceType}: ${ignoredSourceFields.join(", ")}.`
+        : "";
+      const next = result.action === "quarantined"
+        ? " Next: call monitor_inspect; do not approve or repeat the watcher automatically."
+        : " Next: continue working; use monitor_status to inspect it. Do not call monitor again just to check status.";
+      return {
+        ...text(`${result.action.toUpperCase()}: watcher ${result.watcher.handleId} [${result.watcher.mode}] state=${result.watcher.state}${result.reason ? ` reason=${result.reason}` : "."}${ignored}${next}`),
+        details: { action: result.action, watcher: watcherMeta(result.watcher), sourceType, ignoredSourceFields },
+      };
     },
   });
 

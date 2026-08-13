@@ -9,7 +9,7 @@ let installedPackage;
 try { installedPackage = JSON.parse(await readFile(installedPackagePath, "utf8")); } catch { installedPackage = null; }
 
 test("repository package version is captured", () => {
-  assert.equal(repoPackage.version, "2.0.1");
+  assert.equal(repoPackage.version, "2.0.2");
 });
 
 test("Pi-managed legacy install mismatch is captured when present", async () => {

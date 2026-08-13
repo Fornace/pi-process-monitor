@@ -25,11 +25,14 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
-          cache: npm
+          package-manager-cache: false
+
+      - name: Setup npm trusted-publishing client
+        run: npm install --global npm@11.16.0 && npm --version
 
       - name: Install
         run: npm ci --ignore-scripts
@@ -56,3 +59,5 @@ jobs:
       # See docs/PUBLISH.md.
       - name: Publish
         run: npm publish --access public
+        env:
+          NODE_OPTIONS: "--experimental-strip-types"

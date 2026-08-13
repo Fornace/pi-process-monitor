@@ -28,32 +28,53 @@ This release is a major because local poll recovery now fails closed. See [migra
 
 ## Modes
 
-| Mode | Source | Default recovery | Purpose |
-|---|---|---|---|
-| spawn | `command` | `never` | One extension-owned local process tree |
-| poll | `command` + `intervalSeconds` | remote `safe-auto`; local `confirm` | Read-only observation of independent work |
-| file | `logFile` | `safe-auto` | Appended log lines |
-| structured | `probe` + optional interval | based on probe type | Process, file, SSH, or HTTP observation |
+The `monitor` tool takes one required, discriminated `source` object. `source.type`
+is authoritative, so strict providers can safely emit `null` for irrelevant
+source fields without creating source conflicts.
 
-Structured probes:
+| Mode | `source.type` | Required source fields | Default recovery | Purpose |
+|---|---|---|---|---|
+| spawn | `spawn` | `command` | `never` | One extension-owned local process tree |
+| poll | `poll` | `command`, optional `intervalSeconds` | remote `safe-auto`; local `confirm` | Read-only observation of independent work |
+| file tail | `tail` | `path` | `safe-auto` | Appended log lines |
+| process | `process` | `processBy` plus `pidFile` or `match` | `confirm` | Structured local process observation |
+| file | `file` | `path`, optional `tailLines` | `safe-auto` | Structured file observation |
+| SSH | `ssh` | `host`, `command` | `safe-auto` | Structured remote observation |
+| HTTP | `http` | `url`, optional `method` | `safe-auto` | Structured endpoint observation |
+
+Source examples:
 
 ```json
-{ "probe": { "type": "process", "pidFile": "/tmp/job.pid" }, "intervalSeconds": 10 }
-{ "probe": { "type": "file", "path": "/tmp/job.log", "tailLines": 20 } }
-{ "probe": { "type": "ssh", "host": "h100", "command": "tail -n5 train.log" }, "intervalSeconds": 30 }
-{ "probe": { "type": "http", "url": "https://ci.example/run/42", "method": "GET" }, "intervalSeconds": 30 }
+{ "source": { "type": "spawn", "command": "npm test" }, "options": null }
+{ "source": { "type": "poll", "command": "gh run view 123", "intervalSeconds": 15 }, "options": null }
+{ "source": { "type": "tail", "path": "/tmp/job.log" }, "options": null }
+{ "source": { "type": "process", "processBy": "pidFile", "pidFile": "/tmp/job.pid", "intervalSeconds": 10 }, "options": null }
+{ "source": { "type": "file", "path": "/tmp/job.log", "tailLines": 20 }, "options": null }
+{ "source": { "type": "ssh", "host": "h100", "command": "tail -n5 train.log", "intervalSeconds": 30 }, "options": null }
+{ "source": { "type": "http", "url": "https://ci.example/run/42", "method": "GET", "intervalSeconds": 30 }, "options": null }
 ```
+
+Minimal objects are accepted and normalized before validation. OpenAI strict
+function calling may materialize every declared source field; in that form,
+set unrelated fields to `null`. The runtime always follows `source.type` and
+reports any non-null unrelated fields it ignored.
 
 ## Start or reuse a watcher
 
 ```json
 {
-  "probe": { "type": "ssh", "host": "h100", "command": "tail -n5 /root/train.log; echo ALIVE=$(pgrep -fc axolotl)" },
-  "intervalSeconds": 30,
-  "label": "h100-qlora",
-  "notifyOn": ["adapter.*saved", "error|oom|killed|traceback", "ALIVE=0"],
-  "expiresAt": "2026-08-03T00:00:00Z",
-  "reuse": "return-existing"
+  "source": {
+    "type": "ssh",
+    "host": "h100",
+    "command": "tail -n5 /root/train.log; echo ALIVE=$(pgrep -fc axolotl)",
+    "intervalSeconds": 30
+  },
+  "options": {
+    "label": "h100-qlora",
+    "notifyOn": ["adapter.*saved", "error|oom|killed|traceback", "ALIVE=0"],
+    "expiresAt": "2026-08-03T00:00:00Z",
+    "reuse": "return-existing"
+  }
 }
 ```
 
@@ -61,14 +82,20 @@ The result explicitly says `created`, `reused`, `replaced`, or `quarantined`.
 
 ### Important parameters
 
-- `recoveryPolicy`: `never`, `confirm`, or `safe-auto`.
-- `reuse`: `return-existing` (default), `replace`, or `parallel`.
-- `reuseKey`: explicit logical purpose; required for intentional parallel local polls.
-- `expiresAt`: absolute ISO-8601 lifetime. `timeoutSeconds` remains as compatibility input and converts once to `expiresAt`.
-- `pollTimeoutSeconds`: per-tick deadline, shorter than the interval.
-- `maxConsecutiveFailures`, `backoffMaxSeconds`: bounded retry behavior.
-- `safetyClass`: `auto`, `observer`, or `unsafe-shell`. `observer` is an explicit acknowledgement, not a sandbox.
-- `notifyOn`, `heartbeatMinutes`, `coalesceSeconds`, `maxLines`, `cwd` retain their previous meanings.
+- `source.type`: explicit mode discriminator. It prevents strict schema
+  normalizers from turning optional alternatives into conflicting sources.
+- `source.intervalSeconds`: cadence for `poll`, `process`, `ssh`, and `http`.
+  A `spawn` source always runs once; cadence fields generated for it are ignored.
+- `source.processBy`: selects `pidFile` or `match`, so a strict provider cannot
+  fabricate both process identities.
+- `options.recoveryPolicy`: `never`, `confirm`, or `safe-auto`.
+- `options.reuse`: `return-existing` (default), `replace`, or `parallel`.
+- `options.reuseKey`: explicit logical purpose; required for intentional parallel local polls.
+- `options.expiresAt`: absolute ISO-8601 lifetime. `timeoutSeconds` remains as compatibility input and converts once to `expiresAt`.
+- `options.pollTimeoutSeconds`: per-tick deadline, shorter than the interval.
+- `options.maxConsecutiveFailures`, `options.backoffMaxSeconds`: bounded retry behavior.
+- `options.safetyClass`: `auto`, `observer`, or `unsafe-shell`. `observer` is an explicit acknowledgement, not a sandbox.
+- `options.notifyOn`, `options.heartbeatMinutes`, `options.coalesceSeconds`, `options.maxLines`, and `options.cwd` retain their previous meanings.
 
 Raw local shell polls that contain workload executables/verbs, redirection, or backgrounding are quarantined. Prefer a structured probe. Never put training, conversion, build, test, package installation, or “start-if-missing” logic in a poll command.
 
@@ -109,11 +136,12 @@ monitor recovery: 2 resumed, 1 reused, 3 expired, 2 quarantined, 4 stale records
 ## Agent rules
 
 1. Call `monitor_status` or rely on exact reuse before creation.
-2. Use spawn for local work and poll only for independent durable work.
-3. Prefer PID files, workflow/run IDs, exact paths, remote job IDs, and structured probes.
-4. Give temporary observers an absolute expiry.
-5. A timeout means diagnose; do not launch an identical watcher or blocking retry.
-6. After abnormal restarts, inspect quarantined watchers before approval.
+2. Choose one explicit `source.type`; never infer spawn versus poll from an optional field.
+3. Use `spawn` for local work and `poll` only for independent durable work.
+4. Prefer PID files, workflow/run IDs, exact paths, remote job IDs, and structured source types.
+5. Give temporary observers an absolute `options.expiresAt`.
+6. A timeout means diagnose; do not launch an identical watcher or blocking retry.
+7. After abnormal restarts, inspect quarantined watchers before approval.
 
 ## Development
 

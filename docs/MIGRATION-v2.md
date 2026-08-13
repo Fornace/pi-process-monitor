@@ -2,6 +2,33 @@
 
 Reviewed: 2026-08-02
 
+## Version 2.0.2 tool-input migration
+
+The runtime watcher modes and persisted `WatcherConfig` are unchanged. The
+provider-facing `monitor` tool now uses one discriminated `source` object:
+
+```json
+{ "source": { "type": "spawn", "command": "npm test" }, "options": null }
+```
+
+This replaces three mutually exclusive optional root fields (`command`,
+`logFile`, `probe`) that strict OpenAI-compatible schema normalizers converted
+into required fields. Those normalizers forced models to fabricate all three
+sources, making a valid call impossible and causing repeated "provide exactly
+one source" errors.
+
+The new schema follows strict function-calling rules: all declared fields are
+required, but irrelevant values are nullable. `source.type` is authoritative,
+so generated alternatives cannot conflict. `processBy` similarly selects
+`pidFile` or `match`. Legacy top-level calls remain accepted through
+`prepareArguments`; stored state and recovery records need no migration.
+
+No feature was removed. In particular, command polling remains available as
+`source.type="poll"`; `source.type="spawn"` always runs once. This explicit
+mode distinction replaces the previous implicit `command + intervalSeconds`
+selection and prevents agents from incorrectly treating `intervalSeconds` as
+invalid globally.
+
 ## Version 2 state
 
 New releases write `monitor-state-v2` custom entries. Each logical watcher has a stable UUID, monotonic revision, lifecycle event, canonical source fingerprint, recovery policy, absolute expiry, and optional owner lease. Recovery reads only `SessionManager.getBranch()`.

@@ -1,6 +1,6 @@
 {
   "name": "pi-process-monitor",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Non-blocking background watcher for pi: start a process, SSH poll, or log tail and get pinged in-session on milestones, failure, or exit. Claude Code's Monitor tool, with conditional delivery.",
   "type": "module",
   "license": "MIT",
@@ -38,6 +38,7 @@
     "docs/GROUNDING-RECEIPT-2026-08-02.md",
     "docs/MIGRATION-v2.md",
     "docs/COMPLETION-AUDIT-2026-08-02.md",
+    "docs/COMPLETION-AUDIT-2026-08-13.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

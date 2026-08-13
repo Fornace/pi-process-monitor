@@ -33,9 +33,12 @@ One-time setup is required by Francesco on npmjs.com (2 minutes).
    gh workflow run publish.yml --repo Fornace/pi-process-monitor --ref v<x.y.z>
    ```
 
-The workflow (`.github/workflows/publish.yml`) runs typecheck, the full test
-suite, smoke, and a pack dry-run before `npm publish --access public`. The
-`id-token: write` permission is required and already set.
+The workflow (`.github/workflows/publish.yml`) runs on Node 24, installs npm
+11.5.1 or newer (the minimum versions required for trusted publishing are Node
+22.14.0 and npm 11.5.1), then runs typecheck, the full test suite, smoke, and a
+pack dry-run before `npm publish --access public`. The `id-token: write`
+permission is required and already set. Release-build package-manager caching
+is disabled per npm's current trusted-publisher guidance.
 
 Optionally, after the first successful trusted publish, restrict publishing
 access to tokens (Settings -> Publishing access -> "Require two-factor

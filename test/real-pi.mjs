@@ -22,7 +22,7 @@ const args = [
   "--no-builtin-tools", "--tools", "monitor", "--mode", "json",
   "--provider", provider,
   "--model", model,
-  "Call monitor once with command 'printf schema-real-pi-ok' and label schema-real-pi. Omit every unused field. Report the result.",
+  "Use monitor to run printf schema-real-pi-ok exactly once. Report the result. Do not call monitor again for status.",
 ];
 
 const stdout = [];
@@ -46,9 +46,14 @@ try {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
-  const call = events.find((event) => event.type === "tool_execution_start" && event.toolName === "monitor");
+  const calls = events.filter((event) => event.type === "tool_execution_start" && event.toolName === "monitor");
+  assert.equal(calls.length, 1, `expected exactly one monitor call, received ${calls.length}; see ${outPath}`);
+  const call = calls[0];
   assert.ok(call, `missing monitor call; see ${outPath}`);
-  assert.deepEqual(call.args, { command: "printf schema-real-pi-ok", label: "schema-real-pi" });
+  assert.equal(call.args?.source?.type, "spawn", `wrong source discriminator; see ${outPath}`);
+  assert.equal(call.args?.source?.command, "printf schema-real-pi-ok", `wrong command; see ${outPath}`);
+  assert.ok(call.args?.options === null || typeof call.args?.options === "object", `invalid options shape; see ${outPath}`);
+  assert.equal("command" in call.args, false, `legacy root command leaked into provider shape; see ${outPath}`);
   const end = events.find((event) => event.type === "tool_execution_end" && event.toolCallId === call.toolCallId);
   assert.equal(end?.isError, false, `monitor failed; see ${outPath}`);
   assert.equal(end?.result?.details?.watcher?.mode, "spawn");
@@ -56,7 +61,7 @@ try {
     events.some((event) => event.type === "message_end" && event.message?.customType === "monitor" && /PROCESS EXITED \(code=0/.test(event.message.content)),
     `missing clean exit ping; see ${outPath}`,
   );
-  console.log(`✓ real Pi provider call used one source and exited cleanly (${outPath})`);
+  console.log(`✓ real Pi provider call used source.type=spawn and exited cleanly (${outPath})`);
 } finally {
   await rm(workDir, { recursive: true, force: true });
 }

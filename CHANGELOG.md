@@ -2,6 +2,29 @@
 
 All notable changes to `pi-process-monitor` are documented here.
 
+## [2.0.2] - 2026-08-13
+
+### Fixed
+
+- Replaced the three competing optional root sources (`command`, `logFile`, and
+  `probe`) with one required discriminated `source` object. OpenAI strict mode
+  requires every declared property; irrelevant source values are now nullable
+  and `source.type` is authoritative.
+- Added `source.processBy` to choose `pidFile` or `match`, preventing strict
+  decoders from fabricating two process identities.
+- Added actionable validation errors that name the selected source type,
+  missing/conflicting fields, and a valid minimal example.
+- Added regression coverage for the exact `fornace-max` failure payload where
+  every source field was materialized with plausible placeholder values.
+- Kept legacy top-level tool calls working through `prepareArguments`.
+
+### Preserved
+
+- All watcher features remain available: one-shot spawn, read-only local/remote
+  shell poll, file tail, process/file/SSH/HTTP probes, reuse, recovery,
+  quarantine, lifecycle inspection, and GC. Command polling is now explicit as
+  `source.type="poll"`; it was not removed.
+
 ## [2.0.1] - 2026-08-12
 
 ### Fixed
