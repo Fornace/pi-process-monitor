@@ -1,3 +1,13 @@
+<!-- unisvq-current-contract: 2026-08-29 -->
+> [!IMPORTANT]
+> **Current UniSVQ truth (2026-08-29):** UniSVQ is calibrated vector assignment
+> plus reconstruction optimization, not scalar rounding or a packed-UInt2
+> conversion. Official UniSVQ PTQ includes block reconstruction; LC-QAT adds
+> substantial end-to-end training. Native UInt2 is only the coordinate
+> contraction primitive. Historical results below keep their original scope.
+> See [UNISVQ-CURRENT-CONTRACT-2026-08-29.md](UNISVQ-CURRENT-CONTRACT-2026-08-29.md).
+<!-- /unisvq-current-contract -->
+
 # Engineering brief: crash-safe monitor identity, recovery, and lifecycle GC
 
 **Repository:** `pi-process-monitor`  
