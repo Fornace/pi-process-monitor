@@ -33,6 +33,7 @@ Legacy top-level `command`, `logFile`, and `probe` calls remain accepted through
 - Prefer structured `process`, `file`, `ssh`, and `http` sources to raw shell polling.
 - If the user asks you to stop using monitor, stop immediately and continue with direct execution. Do not retry the tool with alternative argument shapes.
 - Long-running retryable computation belongs in CI, Restate, Trigger.dev, or another workflow engine; monitor observes it.
+- Poll commands must exit zero for every successful observation, including terminal states. Emit status or a completion marker for `notifyOn`; do not encode routine completion as exit 1, because nonzero exits count as failures and can suspend the watcher.
 - Never combine a monitor-launched job with blocking bash retries of the same job.
 
 ## Before creating
