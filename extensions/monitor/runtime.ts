@@ -61,6 +61,9 @@ export class MonitorRuntime {
   }
 
   private emit(watcher: RuntimeWatcher, body: string): void {
+    // Cleanup intentionally terminates owned children. Their exit callbacks
+    // must not schedule an agent turn while extensions are being torn down.
+    if (this.shuttingDown) return;
     watcher.lastEventAt = Date.now();
     watcher.eventCount++;
     this.pi.sendMessage(
