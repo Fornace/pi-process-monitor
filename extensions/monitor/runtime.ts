@@ -216,17 +216,27 @@ export class MonitorRuntime {
       const controller = startFileRuntime({ watcher, matcher, push: coalescer.push, onFailure: (message) => this.emit(watcher, message) });
       resourceStop = controller.stop;
     }
+    let stopped = false;
     let expiry: NodeJS.Timeout | undefined;
     if (watcher.config.expiresAt) {
-      expiry = setTimeout(() => void watcher.stop("expire"), Math.max(0, Date.parse(watcher.config.expiresAt) - Date.now()));
-      expiry.unref?.();
+      const expiresAt = Date.parse(watcher.config.expiresAt);
+      const armExpiry = () => {
+        // Node clamps delays above 2^31 - 1 ms to 1 ms. Keep the absolute
+        // deadline and recompute after each bounded chunk (or clock change).
+        expiry = setTimeout(() => {
+          if (stopped) return;
+          if (Date.now() < expiresAt) armExpiry();
+          else void watcher.stop("expire");
+        }, Math.min(2_147_483_647, Math.max(1, expiresAt - Date.now())));
+        expiry.unref?.();
+      };
+      armExpiry();
     }
     let heartbeat: NodeJS.Timeout | undefined;
     if (watcher.config.heartbeatMinutes) {
       heartbeat = setInterval(() => this.emit(watcher, `heartbeat: still running (events=${watcher.eventCount})`), Math.max(1, watcher.config.heartbeatMinutes) * 60_000);
       heartbeat.unref?.();
     }
-    let stopped = false;
     watcher.stop = async (intent = "stop") => {
       if (stopped) return;
       stopped = true;
