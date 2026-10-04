@@ -9,7 +9,9 @@ import type { RuntimeWatcher } from "./types.ts";
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
 export function watcherMeta(watcher: RuntimeWatcher) {
-  return {
+  // Results enter append-only session history. Polls and process cleanup mutate
+  // receipts after return, so no live watcher references may escape here.
+  return structuredClone({
     id: watcher.handleId,
     logicalId: watcher.logicalId,
     label: watcher.label,
@@ -29,7 +31,7 @@ export function watcherMeta(watcher: RuntimeWatcher) {
     receipt: watcher.receipt,
     receipts: watcher.receipts,
     foreignOwner: watcher.foreignOwner,
-  };
+  });
 }
 
 export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
