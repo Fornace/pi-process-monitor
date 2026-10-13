@@ -1,6 +1,7 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { MonitorRuntime } from "./runtime.ts";
+import type { LaunchResult, MonitorRuntime } from "./runtime.ts";
+import { notify } from "./message-ui.ts";
 
 function parseTokens(input: string): string[] {
   const tokens: string[] = [];
@@ -30,7 +31,7 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
     description: "Start/reuse a watcher. Poll mode is observation only: /monitor --poll --every 30 -- ssh host 'tail ...'",
     handler: async (args, ctx) => {
       const tokens = parseTokens(args.trim());
-      if (!tokens.length) { ctx.ui.notify("Usage: /monitor [--poll --every N | --file PATH] [--expires ISO | --timeout N] -- SOURCE", "info"); return; }
+      if (!tokens.length) { notify(pi, ctx, "Usage: /monitor [--poll --every N | --file PATH] [--expires ISO | --timeout N] -- SOURCE", "info"); return; }
       const poll = tokens.includes("--poll");
       const file = option(tokens, "--file");
       const separator = tokens.indexOf("--");
@@ -40,8 +41,9 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
           && !["--every", "--file", "--expires", "--timeout", "--reuse-key"].includes(token);
       });
       const command = commandTokens.join(" ");
+      let result: LaunchResult;
       try {
-        const result = await runtime.launch({
+        result = await runtime.launch({
           command: file ? undefined : command,
           logFile: file,
           intervalSeconds: poll ? Number(option(tokens, "--every") ?? 30) : undefined,
@@ -51,17 +53,17 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
           safetyClass: poll ? "auto" : undefined,
           label: file?.split("/").at(-1) ?? commandTokens.slice(0, 2).join(" "),
         });
-        ctx.ui.notify(`${result.action}: ${result.watcher.handleId} [${result.watcher.mode}] state=${result.watcher.state}${result.reason ? ` · ${result.reason}` : ""}`, result.action === "quarantined" ? "warning" : "info");
-      } catch (error) { ctx.ui.notify(`monitor: ${(error as Error).message}`, "error"); }
+      } catch (error) { notify(pi, ctx, `monitor: ${(error as Error).message}`, "error"); return; }
+      notify(pi, ctx, `${result.action}: ${result.watcher.handleId} [${result.watcher.mode}] state=${result.watcher.state}${result.reason ? ` · ${result.reason}` : ""}`, result.action === "quarantined" ? "warning" : "info");
     },
   });
 
   pi.registerCommand("monitors", {
     description: "List active and quarantined logical watchers",
     handler: async (_args, ctx) => {
-      if (!runtime.watchers.size) { ctx.ui.notify("No watchers.", "info"); return; }
+      if (!runtime.watchers.size) { notify(pi, ctx, "No watchers.", "info"); return; }
       for (const watcher of runtime.watchers.values()) {
-        ctx.ui.notify(`${watcher.handleId} · ${watcher.logicalId.slice(0, 8)} [${watcher.mode}] state=${watcher.state} owner=${watcher.owner?.runtimeId ?? "none"} failures=${watcher.consecutiveFailures}`, "info");
+        notify(pi, ctx, `${watcher.handleId} · ${watcher.logicalId.slice(0, 8)} [${watcher.mode}] state=${watcher.state} owner=${watcher.owner?.runtimeId ?? "none"} failures=${watcher.consecutiveFailures}`, "info");
       }
     },
   });
@@ -77,9 +79,9 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
     getArgumentCompletions: completions,
     handler: async (args, ctx) => {
       const watcher = runtime.find(args.trim());
-      if (!watcher || watcher.foreignOwner) { ctx.ui.notify(watcher ? `Watcher ${watcher.handleId} is owned by another live runtime; not stopped.` : `No watcher ${args.trim()}.`, "warning"); return; }
+      if (!watcher || watcher.foreignOwner) { notify(pi, ctx, watcher ? `Watcher ${watcher.handleId} is owned by another live runtime; not stopped.` : `No watcher ${args.trim()}.`, "warning"); return; }
       await watcher.stop("stop");
-      ctx.ui.notify(`Stopped ${watcher.handleId}; cleanup=${watcher.receipt?.cleanupVerified ?? "n/a"}.`, "info");
+      notify(pi, ctx, `Stopped ${watcher.handleId}; cleanup=${watcher.receipt?.cleanupVerified ?? "n/a"}.`, "info");
     },
   });
 
@@ -88,18 +90,18 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
     getArgumentCompletions: completions,
     handler: async (args, ctx) => {
       const [id, action] = args.trim().split(/\s+/, 2);
-      if (!id || !["approve", "reject"].includes(action ?? "")) { ctx.ui.notify("Usage: /monitor-recover <id> approve|reject", "info"); return; }
+      if (!id || !["approve", "reject"].includes(action ?? "")) { notify(pi, ctx, "Usage: /monitor-recover <id> approve|reject", "info"); return; }
       const result = await runtime.recover(id, action === "approve");
-      ctx.ui.notify(result ? `${result.action}: ${result.watcher.handleId}` : `${action}: ${id}`, "info");
+      notify(pi, ctx, result ? `${result.action}: ${result.watcher.handleId}` : `${action}: ${id}`, "info");
     },
   });
 
   pi.registerCommand("monitor-gc", {
     description: "Append a compact state checkpoint: /monitor-gc [--apply]",
     handler: async (args, ctx) => {
-      if (!args.includes("--apply")) { ctx.ui.notify("monitor GC is dry-run by default; use /monitor-gc --apply to append a checkpoint.", "info"); return; }
+      if (!args.includes("--apply")) { notify(pi, ctx, "monitor GC is dry-run by default; use /monitor-gc --apply to append a checkpoint.", "info"); return; }
       await runtime.checkpoint();
-      ctx.ui.notify("monitor GC checkpoint appended.", "info");
+      notify(pi, ctx, "monitor GC checkpoint appended.", "info");
     },
   });
 }

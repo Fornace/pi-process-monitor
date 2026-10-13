@@ -12,6 +12,7 @@ const pi = {
   registerTool: (definition) => tools.push(definition),
   registerCommand: (name, options) => commands.push({ name, ...options }),
   registerMessageRenderer: () => {},
+  registerEntryRenderer: () => {},
   sendMessage: (message) => sent.push(message),
   appendEntry: (customType, data) => entries.push({ type: "custom", id: String(entries.length), timestamp: new Date().toISOString(), customType, data }),
 };

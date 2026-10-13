@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { notify } from "./message-ui.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { acquireLease, leasePath, leaseRoot, makeOwner, releaseLease, renewLease } from "./leases.ts";
 import { classifyPoll, defaultRecoveryPolicy, modeFor, newLogicalId, shortHandle, sourceFingerprint } from "./identity.ts";
@@ -276,7 +277,7 @@ export class MonitorRuntime {
       else summary.resumed++;
     }
     if (summary.resumed + summary.reused + summary.expired + summary.quarantined + summary.compacted > 0) {
-      ctx.ui?.notify?.(`monitor recovery: ${summary.resumed} resumed, ${summary.reused} reused, ${summary.expired} expired, ${summary.quarantined} quarantined, ${summary.compacted} stale records compacted`, "info");
+      notify(this.pi, ctx, `monitor recovery: ${summary.resumed} resumed, ${summary.reused} reused, ${summary.expired} expired, ${summary.quarantined} quarantined, ${summary.compacted} stale records compacted`, "info");
     }
     return reduced;
   }
