@@ -112,26 +112,17 @@ export interface StopOptions {
   killGraceMs?: number;
 }
 
-function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.off("exit", onExit);
-      resolve(value);
-    };
-    const onExit = () => finish(true);
-    const timer = setTimeout(() => finish(false), timeoutMs);
-    timer.unref?.();
-    child.once("exit", onExit);
-  });
+async function waitForGroupExit(receipt: ProcessReceipt, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (groupAlive(receipt.pgid, receipt.pid)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    await new Promise(resolve => setTimeout(resolve, Math.min(25, remaining)));
+  }
 }
 
 export async function stopOwned(owned: OwnedProcess, options: StopOptions = {}): Promise<ProcessReceipt> {
-  const { child, receipt } = owned;
+  const { receipt } = owned;
   const termGrace = options.termGraceMs ?? 3000;
   const killGrace = options.killGraceMs ?? 2000;
   if (!groupAlive(receipt.pgid, receipt.pid)) {
@@ -140,11 +131,11 @@ export async function stopOwned(owned: OwnedProcess, options: StopOptions = {}):
   }
   receipt.termSentAt = new Date().toISOString();
   signalOwned(receipt, "SIGTERM");
-  await waitForExit(child, termGrace);
+  await waitForGroupExit(receipt, termGrace);
   if (groupAlive(receipt.pgid, receipt.pid)) {
     receipt.killSentAt = new Date().toISOString();
     signalOwned(receipt, "SIGKILL");
-    await waitForExit(child, killGrace);
+    await waitForGroupExit(receipt, killGrace);
   }
   receipt.cleanupVerified = !groupAlive(receipt.pgid, receipt.pid);
   return receipt;
