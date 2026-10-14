@@ -1,4 +1,4 @@
-import { notify, renderMessage } from "./message-ui.ts";
+import { notify, registerMessageUI, renderMessage } from "./message-ui.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { MonitorRuntime } from "./runtime.ts";
 import { registerTools } from "./tools.ts";
@@ -11,6 +11,7 @@ const host = globalThis as typeof globalThis & { [key: symbol]: unknown };
 const handoffs = (host[key] ??= new WeakMap<object, MonitorRuntime>()) as WeakMap<object, MonitorRuntime>;
 
 export default function monitorExtension(pi: ExtensionAPI): void {
+  registerMessageUI(pi);
   let runtime = new MonitorRuntime(pi);
   registerTools(pi, () => runtime);
   registerCommands(pi, () => runtime);
