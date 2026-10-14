@@ -26,10 +26,11 @@ function option(tokens: string[], name: string): string | undefined {
   return index >= 0 ? tokens[index + 1] : undefined;
 }
 
-export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): void {
+export function registerCommands(pi: ExtensionAPI, currentRuntime: () => MonitorRuntime): void {
   pi.registerCommand("monitor", {
     description: "Start/reuse a watcher. Poll mode is observation only: /monitor --poll --every 30 -- ssh host 'tail ...'",
     handler: async (args, ctx) => {
+      const runtime = currentRuntime();
       const tokens = parseTokens(args.trim());
       if (!tokens.length) { notify(pi, ctx, "Usage: /monitor [--poll --every N | --file PATH] [--expires ISO | --timeout N] -- SOURCE", "info"); return; }
       const poll = tokens.includes("--poll");
@@ -61,6 +62,7 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
   pi.registerCommand("monitors", {
     description: "List active and quarantined logical watchers",
     handler: async (_args, ctx) => {
+      const runtime = currentRuntime();
       if (!runtime.watchers.size) { notify(pi, ctx, "No watchers.", "info"); return; }
       for (const watcher of runtime.watchers.values()) {
         notify(pi, ctx, `${watcher.handleId} · ${watcher.logicalId.slice(0, 8)} [${watcher.mode}] state=${watcher.state} owner=${watcher.owner?.runtimeId ?? "none"} failures=${watcher.consecutiveFailures}`, "info");
@@ -69,6 +71,7 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
   });
 
   const completions = (prefix: string): AutocompleteItem[] | null => {
+    const runtime = currentRuntime();
     const items = [...runtime.watchers.values()].filter((watcher) => watcher.handleId.startsWith(prefix) || watcher.logicalId.startsWith(prefix))
       .map((watcher) => ({ value: watcher.handleId, label: watcher.handleId, description: `${watcher.mode} · ${watcher.state}${watcher.label ? ` · ${watcher.label}` : ""}` }));
     return items.length ? items : null;
@@ -78,6 +81,7 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
     description: "Stop one watcher and its extension-owned process group",
     getArgumentCompletions: completions,
     handler: async (args, ctx) => {
+      const runtime = currentRuntime();
       const watcher = runtime.find(args.trim());
       if (!watcher || watcher.foreignOwner) { notify(pi, ctx, watcher ? `Watcher ${watcher.handleId} is owned by another live runtime; not stopped.` : `No watcher ${args.trim()}.`, "warning"); return; }
       await watcher.stop("stop");
@@ -89,6 +93,7 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
     description: "Approve/reject quarantined watcher: /monitor-recover <id> approve|reject",
     getArgumentCompletions: completions,
     handler: async (args, ctx) => {
+      const runtime = currentRuntime();
       const [id, action] = args.trim().split(/\s+/, 2);
       if (!id || !["approve", "reject"].includes(action ?? "")) { notify(pi, ctx, "Usage: /monitor-recover <id> approve|reject", "info"); return; }
       const result = await runtime.recover(id, action === "approve");
@@ -99,6 +104,7 @@ export function registerCommands(pi: ExtensionAPI, runtime: MonitorRuntime): voi
   pi.registerCommand("monitor-gc", {
     description: "Append a compact state checkpoint: /monitor-gc [--apply]",
     handler: async (args, ctx) => {
+      const runtime = currentRuntime();
       if (!args.includes("--apply")) { notify(pi, ctx, "monitor GC is dry-run by default; use /monitor-gc --apply to append a checkpoint.", "info"); return; }
       await runtime.checkpoint();
       notify(pi, ctx, "monitor GC checkpoint appended.", "info");

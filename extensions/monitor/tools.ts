@@ -34,7 +34,7 @@ export function watcherMeta(watcher: RuntimeWatcher) {
   });
 }
 
-export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
+export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRuntime): void {
   pi.registerTool({
     name: "monitor", label: "Monitor",
     description: "Start or exactly reuse one non-blocking watcher. Select an explicit source.type: spawn, poll, tail, process, file, ssh, or http. source.type is authoritative; unrelated generated fields are ignored. Local shell polls are quarantined unless explicitly acknowledged as observers.",
@@ -48,6 +48,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
     parameters: monitorParams,
     prepareArguments: prepareMonitorArguments,
     async execute(_id, params: MonitorParams, _signal, _update, ctx) {
+      const runtime = currentRuntime();
       const { config, sourceType, ignoredSourceFields } = resolveMonitorInput(params, ctx.cwd);
       const result = await runtime.launch(config);
       const ignored = ignoredSourceFields.length
@@ -66,6 +67,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
   pi.registerTool({
     name: "monitor_status", label: "Monitor status", description: "List logical watchers, lifecycle, owner, recovery, expiry, tick, and failure status.",
     parameters: Type.Object({}), async execute() {
+      const runtime = currentRuntime();
       const watchers = [...runtime.watchers.values()].map(watcherMeta);
       if (!watchers.length) return { ...text("No watchers."), details: { watchers } };
       const lines = watchers.map((item) => `${item.id} · ${item.logicalId.slice(0, 8)} [${item.mode}] state=${item.state} owner=${item.owner?.runtimeId ?? "none"} recovery=${item.recoveryPolicy} expires=${item.expiresAt ?? "never"} lastTick=${item.lastTickAt ?? "never"} failures=${item.consecutiveFailures}`);
@@ -76,6 +78,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
   pi.registerTool({
     name: "monitor_inspect", label: "Monitor inspect", description: "Inspect logical identity, lease owner, recovery configuration, and owned process receipt.",
     parameters: Type.Object({ id: Type.String() }), async execute(_id, params) {
+      const runtime = currentRuntime();
       const watcher = runtime.find(params.id);
       const value = watcher ? watcherMeta(watcher) : null;
       return { ...text(value ? JSON.stringify(value, null, 2) : `No watcher ${params.id}.`), details: { watcher: value } };
@@ -85,6 +88,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
   pi.registerTool({
     name: "monitor_kill", label: "Monitor kill", description: "Stop one logical watcher and only its verified extension-owned process group.",
     parameters: Type.Object({ id: Type.String() }), async execute(_id, params) {
+      const runtime = currentRuntime();
       const watcher = runtime.find(params.id);
       if (watcher && !watcher.foreignOwner) await watcher.stop("stop");
       const value = watcher ? watcherMeta(watcher) : null;
@@ -96,6 +100,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
     name: "monitor_recover", label: "Monitor recover", description: "List, approve, or reject quarantined watchers. Approval is explicit and reversible.",
     parameters: Type.Object({ id: Type.Optional(Type.String()), action: Type.Optional(StringEnum(["list", "approve", "reject"] as const)) }),
     async execute(_id, params) {
+      const runtime = currentRuntime();
       const quarantined = [...runtime.watchers.values()].filter((watcher) => watcher.state === "quarantined");
       if (!params.id || !params.action || params.action === "list") return { ...text(quarantined.length ? quarantined.map((watcher) => `${watcher.handleId} ${watcher.label} reason=${runtime.getSnapshots().find((item) => item.logicalId === watcher.logicalId)?.reason ?? "unknown"}`).join("\n") : "No quarantined watchers."), details: { watchers: quarantined.map(watcherMeta) } };
       const result = await runtime.recover(params.id, params.action === "approve");
@@ -107,6 +112,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
   pi.registerTool({
     name: "monitor_gc", label: "Monitor GC", description: "Checkpoint logical state and clean stale external leases. Dry-run by default.",
     parameters: Type.Object({ apply: Type.Optional(Type.Boolean({ default: false })) }), async execute(_id, params) {
+      const runtime = currentRuntime();
       const plan = await planExternalGc(runtime.getStateRoot(), Boolean(params.apply));
       let removedDirectories = 0;
       if (params.apply) { await runtime.checkpoint(); removedDirectories = await applyEmptyDirectoryGc(plan); }
@@ -117,6 +123,7 @@ export function registerTools(pi: ExtensionAPI, runtime: MonitorRuntime): void {
   pi.registerTool({
     name: "monitor_kill_all", label: "Monitor kill all", description: "Stop all current-session extension-owned watchers. Requires confirm=true.",
     parameters: Type.Object({ confirm: Type.Boolean() }), async execute(_id, params) {
+      const runtime = currentRuntime();
       if (!params.confirm) throw new Error("monitor_kill_all requires confirm=true");
       const list = [...runtime.watchers.values()].filter((watcher) => !watcher.foreignOwner);
       await Promise.all(list.map((watcher) => watcher.stop("stop")));

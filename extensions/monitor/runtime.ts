@@ -26,17 +26,41 @@ export class MonitorRuntime {
   private sessionId = "ephemeral";
   private stateRoot = leaseRoot();
   private shuttingDown = false;
+  private shutdownReason = "quit";
   private fuse: FuseDecision = { quarantineLocalPolls: false, disableAllLocalRecovery: false, recent10m: 0, recent30m: 0 };
   private snapshots = new Map<string, WatcherSnapshot>();
   private stateEvents = 0;
   private cleanSessionStart = false;
 
-  private pi: ExtensionAPI;
+  private pi?: ExtensionAPI;
+  private pendingState: WatcherStateEvent[] = [];
+  private pendingMessages: Array<{ watcher: RuntimeWatcher; body: string }> = [];
 
   constructor(pi: ExtensionAPI) { this.pi = pi; }
 
+  /** Keep owned resources, never the invalidated extension API, across reload. */
+  async pauseForReload(): Promise<void> {
+    await this.checkpoint();
+    this.pi = undefined;
+  }
+
+  resumeAfterReload(pi: ExtensionAPI, ctx: ExtensionContext): void {
+    if (this.pi || ctx.sessionManager.getSessionId() !== this.sessionId) throw new Error("Monitor reload handoff targets a different session or active runtime");
+    this.pi = pi;
+    while (this.pendingState.length) {
+      pi.appendEntry(STATE_CUSTOM_TYPE, this.pendingState[0]);
+      this.pendingState.shift();
+    }
+    while (this.pendingMessages.length) {
+      const message = this.pendingMessages[0];
+      this.send(message.watcher, message.body);
+      this.pendingMessages.shift();
+    }
+  }
+
   private append(event: WatcherStateEvent): void {
-    this.pi.appendEntry(STATE_CUSTOM_TYPE, event);
+    if (this.pi) this.pi.appendEntry(STATE_CUSTOM_TYPE, event);
+    else this.pendingState.push(structuredClone(event));
     this.stateEvents++;
     if (event.event !== "checkpoint") {
       this.snapshots.set(event.logicalId, {
@@ -67,6 +91,12 @@ export class MonitorRuntime {
     if (this.shuttingDown) return;
     watcher.lastEventAt = Date.now();
     watcher.eventCount++;
+    if (!this.pi) { this.pendingMessages.push({ watcher, body }); return; }
+    this.send(watcher, body);
+  }
+
+  private send(watcher: RuntimeWatcher, body: string): void {
+    if (!this.pi) throw new Error("Monitor notification has no current extension binding");
     this.pi.sendMessage(
       { customType: "monitor", content: `[watcher ${watcher.handleId}${watcher.label ? ` · ${watcher.label}` : ""}] ${body}`, display: true, details: { logicalId: watcher.logicalId } },
       { triggerTurn: true, deliverAs: "steer" },
@@ -248,7 +278,7 @@ export class MonitorRuntime {
       await this.releaseClaim(watcher);
       const state = intent === "release" ? "released" : intent === "expire" ? "expired" : intent === "quarantine" ? "quarantined" : "stopped";
       if (!(this.shuttingDown && state === "released")) this.transition(watcher, state);
-      else this.transition(watcher, "released", "clean session shutdown");
+      else this.transition(watcher, "released", `session shutdown (${this.shutdownReason})`);
       if (state !== "quarantined") this.watchers.delete(watcher.logicalId);
     };
   }
@@ -277,6 +307,7 @@ export class MonitorRuntime {
       else summary.resumed++;
     }
     if (summary.resumed + summary.reused + summary.expired + summary.quarantined + summary.compacted > 0) {
+      if (!this.pi) throw new Error("Monitor session has no current extension binding");
       notify(this.pi, ctx, `monitor recovery: ${summary.resumed} resumed, ${summary.reused} reused, ${summary.expired} expired, ${summary.quarantined} quarantined, ${summary.compacted} stale records compacted`, "info");
     }
     return reduced;
@@ -293,7 +324,8 @@ export class MonitorRuntime {
     this.stateEvents = 0;
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(reason = "quit"): Promise<void> {
+    this.shutdownReason = reason;
     this.shuttingDown = true;
     await Promise.all([...this.watchers.values()].map((watcher) => watcher.stop("release")));
     this.watchers.clear();

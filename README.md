@@ -125,7 +125,7 @@ Raw local shell polls that contain workload executables/verbs, redirection, or b
 
 ## Recovery and persistence
 
-Version 2 state is reduced only from Pi's active branch. Recovery retains the logical ID and appends a claim, never a synthetic creation. Clean shutdown releases the lease but preserves user intent. Checkpoints bound logical history; external GC archives corrupt/orphan lease receipts and removes empty state directories. It never kills an unverified PID or unrelated process.
+Version 2 state is reduced only from Pi's active branch. Recovery retains the logical ID and appends a claim, never a synthetic creation. Extension reload transfers the same process-local resources to the fresh extension API for the exact native session manager. Child PIDs, leases, expiry and callbacks continue without replaying a spawn command. State and exit notifications produced during the reload gap are delivered through the new API. Quit and session replacement still stop owned resources and record the shutdown reason. A host restart cannot inherit live spawn resources: `recoveryPolicy: never` remains non-replayable. Checkpoints bound logical history; external GC archives corrupt/orphan lease receipts and removes empty state directories. It never kills an unverified PID or unrelated process.
 
 Startup emits one summary rather than one notification per historical record:
 
