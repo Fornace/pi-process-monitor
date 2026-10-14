@@ -4,6 +4,10 @@ Non-blocking, crash-safe background observation for [Pi](https://pi.dev). Start 
 
 ![pi-process-monitor preview](docs/preview.png)
 
+## Notification contract
+
+This source requires native Pi `NotificationMessageComponent` and `NOTIFICATION_ENTRY`. Generic notices are host-rendered UI-only data; no pi-fornace renderer bridge is required. Result messages keep their own data types. An older host fails explicitly and must be upgraded before this source is activated.
+
 ## Safety model
 
 - **Observe, do not schedule:** spawn mode owns a local workload; poll mode runs only fast read-only probes.
