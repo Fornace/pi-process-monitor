@@ -18,7 +18,7 @@ export default function monitorExtension(pi: ExtensionAPI): void {
 
   pi.registerMessageRenderer("monitor", (message, options, theme) => {
     const value = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
-    return renderMessage(pi, value, theme, { expanded: options.expanded });
+    return renderMessage(value, theme, { expanded: options.expanded });
   });
 
   pi.on("session_start", async (event, ctx) => {

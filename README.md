@@ -4,6 +4,10 @@ Non-blocking, crash-safe background observation for [Pi](https://pi.dev). Start 
 
 ![pi-process-monitor preview](docs/preview.png)
 
+## Notification contract
+
+Notices use official Pi TUI components through a bundled shared module. They render without loading pi-fornace or modifying Pi. New notices use a package-owned entry type; historical Fornace notices remain readable. `extensions/shared/fornace-messages.ts` is generated from the source identified in `SOURCE.json`, never edited independently.
+
 ## Safety model
 
 - **Observe, do not schedule:** spawn mode owns a local workload; poll mode runs only fast read-only probes.
