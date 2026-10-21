@@ -232,6 +232,7 @@ export class MonitorRuntime {
     if (watcher.mode === "spawn") {
       if (!command) throw new Error("spawn watcher requires command");
       const controller = startSpawnRuntime({ watcher, command, push: coalescer.push, onFailure: (message) => this.emit(watcher, message), onExit: (code, signal) => {
+        coalescer.flush();
         this.emit(watcher, `PROCESS EXITED (code=${code} signal=${signal ?? "none"})`);
         void watcher.stop("stop");
       } });
