@@ -2,6 +2,12 @@
 
 All notable changes to `pi-process-monitor` are documented here.
 
+## [2.0.6] - 2026-10-21
+
+### Fixed
+
+- Extension reload adopts installed runtime methods while retaining live watcher resources, leases and process ownership. New watchers receive the current output-draining behavior without replaying existing jobs.
+
 ## [2.0.2] - 2026-08-13
 
 ### Fixed

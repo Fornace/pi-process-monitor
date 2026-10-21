@@ -25,6 +25,8 @@ export default function monitorExtension(pi: ExtensionAPI): void {
     try {
       const retained = handoffs.get(ctx.sessionManager);
       if (retained && event.reason === "reload") {
+        // Keep live resources, not the previous package's runtime methods.
+        Object.setPrototypeOf(retained, MonitorRuntime.prototype);
         runtime = retained;
         runtime.resumeAfterReload(pi, ctx);
         handoffs.delete(ctx.sessionManager);
