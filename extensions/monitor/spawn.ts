@@ -40,7 +40,7 @@ export function startSpawnRuntime(options: SpawnRuntimeOptions): SpawnController
     watcher.receipt = owned.receipt;
     watcher.receipts.push(owned.receipt);
     owned.child.once("error", (error) => options.onFailure(`SPAWN ERROR: ${error.message}`));
-    owned.child.once("exit", (code, signal) => {
+    owned.child.once("close", (code, signal) => {
       if (stdoutBuffer.trim()) options.push(stdoutBuffer);
       if (stderrBuffer.trim()) options.push(stderrBuffer);
       watcher.child = undefined;
