@@ -60,6 +60,26 @@ export interface OwnerRecord {
   leaseUntil: string;
 }
 
+export interface LeaseDiskSnapshot {
+  exists: boolean;
+  ino?: number;
+  size?: number;
+  mtime?: string;
+  raw?: string;
+  parsedOwner?: OwnerRecord | null;
+  readError?: string;
+}
+
+export interface LeaseFailureSnapshot {
+  failedAt: string;
+  stage: "precheck" | "open" | "verify" | "write" | "postcheck";
+  error: string;
+  code?: string;
+  leasePath: string;
+  expectedOwner: OwnerRecord;
+  disk: LeaseDiskSnapshot;
+}
+
 export interface WatcherStateEvent {
   schemaVersion: typeof STATE_SCHEMA_VERSION;
   logicalId: string;
@@ -74,6 +94,7 @@ export interface WatcherStateEvent {
   recoveryPolicy: RecoveryPolicy;
   config?: WatcherConfig;
   reason?: string;
+  leaseFailure?: LeaseFailureSnapshot;
   checkpoint?: CheckpointData;
 }
 
@@ -90,6 +111,7 @@ export interface WatcherSnapshot {
   config?: WatcherConfig;
   owner?: OwnerRecord;
   reason?: string;
+  leaseFailure?: LeaseFailureSnapshot;
   legacy?: boolean;
 }
 
@@ -155,11 +177,13 @@ export interface RuntimeWatcher {
   consecutiveFailures: number;
   nextTickAt?: number;
   owner?: OwnerRecord;
+  reason?: string;
+  leaseFailure?: LeaseFailureSnapshot;
   receipt?: ProcessReceipt;
   receipts: ProcessReceipt[];
   child?: ChildProcess;
   foreignOwner?: boolean;
-  stop: (intent?: "stop" | "release" | "expire" | "quarantine") => Promise<void>;
+  stop: (intent?: "stop" | "release" | "expire" | "quarantine", reason?: string) => Promise<void>;
 }
 
 export const TERMINAL_STATES = new Set<LifecycleState>(["stopped", "expired"]);

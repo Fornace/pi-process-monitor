@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import type { OwnerRecord } from "./types.ts";
+import type { LeaseDiskSnapshot, LeaseFailureSnapshot, OwnerRecord } from "./types.ts";
 
 const DEFAULT_LEASE_MS = 45_000;
 
@@ -82,14 +82,98 @@ export function leasePath(root: string, sessionId: string, logicalId: string): s
   return join(root, safeSegment(sessionId), `${safeSegment(logicalId)}.lease`);
 }
 
-async function readOwner(path: string): Promise<OwnerRecord | undefined> {
+const pathLocks = new Map<string, Promise<unknown>>();
+
+function withLeasePathLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const previous = pathLocks.get(path) ?? Promise.resolve();
+  const next = previous.then(fn, fn);
+  const tracked = next.then(
+    () => { if (pathLocks.get(path) === tracked) pathLocks.delete(path); },
+    () => { if (pathLocks.get(path) === tracked) pathLocks.delete(path); },
+  );
+  pathLocks.set(path, tracked);
+  return next;
+}
+
+function parseOwnerRecord(raw: string): OwnerRecord | undefined {
   try {
-    const value = JSON.parse(await readFile(path, "utf8")) as OwnerRecord;
+    const value = JSON.parse(raw) as OwnerRecord;
     if (!value || typeof value.runtimeId !== "string" || typeof value.pid !== "number"
       || typeof value.bootId !== "string" || typeof value.processStart !== "string"
       || typeof value.leaseUntil !== "string" || typeof value.ownerEpoch !== "string") return undefined;
     return value;
   } catch { return undefined; }
+}
+
+async function readOwner(path: string): Promise<OwnerRecord | undefined> {
+  try {
+    return parseOwnerRecord(await readFile(path, "utf8"));
+  } catch { return undefined; }
+}
+
+export async function readLeaseDiskSnapshot(path: string): Promise<LeaseDiskSnapshot> {
+  let info;
+  try {
+    info = await stat(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { exists: false };
+    return { exists: false, readError: `${code ?? "ERR"}: ${(error as Error).message}` };
+  }
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsedOwner = parseOwnerRecord(raw) ?? null;
+    return {
+      exists: true,
+      ino: info.ino,
+      size: info.size,
+      mtime: info.mtime.toISOString(),
+      raw: raw.slice(0, 1024),
+      parsedOwner,
+    };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return {
+      exists: true,
+      ino: info.ino,
+      size: info.size,
+      mtime: info.mtime.toISOString(),
+      readError: `${code ?? "ERR"}: ${(error as Error).message}`,
+    };
+  }
+}
+
+export class LeaseRenewalError extends Error {
+  readonly snapshot: LeaseFailureSnapshot;
+  readonly code?: string;
+
+  constructor(message: string, snapshot: LeaseFailureSnapshot) {
+    super(message);
+    this.name = "LeaseRenewalError";
+    this.snapshot = snapshot;
+    this.code = snapshot.code;
+  }
+}
+
+export async function captureLeaseFailure(
+  path: string,
+  expectedOwner: OwnerRecord,
+  error: unknown,
+  now = Date.now(),
+): Promise<LeaseFailureSnapshot> {
+  if (error instanceof LeaseRenewalError) return structuredClone(error.snapshot);
+  const disk = await readLeaseDiskSnapshot(path);
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    failedAt: new Date(now).toISOString(),
+    stage: "verify",
+    error: message,
+    code,
+    leasePath: path,
+    expectedOwner: structuredClone(expectedOwner),
+    disk,
+  };
 }
 
 export function validateOwner(owner: OwnerRecord, env = defaultLeaseEnvironment): LeaseValidation {
@@ -160,39 +244,129 @@ export async function acquireLease(
   return { acquired: false, reason: "lease race exhausted" };
 }
 
+function describeDiskMismatch(expected: OwnerRecord, disk: LeaseDiskSnapshot, prefix: string): string {
+  if (!disk.exists) return `${prefix}: lease file missing${disk.readError ? ` (${disk.readError})` : ""}`;
+  if (disk.parsedOwner) {
+    return `${prefix}: expected epoch ${expected.ownerEpoch}, found ${disk.parsedOwner.ownerEpoch} (pid=${disk.parsedOwner.pid}, runtime=${disk.parsedOwner.runtimeId})`;
+  }
+  return `${prefix}: invalid lease record (size=${disk.size ?? "unknown"}${disk.readError ? `, ${disk.readError}` : ""})`;
+}
+
 export async function renewLease(path: string, owner: OwnerRecord, leaseMs = DEFAULT_LEASE_MS, env = defaultLeaseEnvironment): Promise<OwnerRecord> {
-  const current = await readOwner(path);
-  if (!current || current.ownerEpoch !== owner.ownerEpoch) throw new Error("lease ownership changed");
-  const renewed = { ...owner, leaseUntil: new Date(env.now() + leaseMs).toISOString() };
-  // Write through the already-open lease inode so a concurrent stale archive +
-  // replacement cannot be overwritten by path rename.
-  const handle = await open(path, "r+");
-  try {
-    const verified = JSON.parse(await handle.readFile("utf8")) as OwnerRecord;
-    if (verified.ownerEpoch !== owner.ownerEpoch) throw new Error("lease ownership changed");
-    await handle.truncate(0);
-    await handle.write(`${JSON.stringify(renewed)}\n`, 0, "utf8");
-    await handle.sync();
-  } finally { await handle.close(); }
-  const after = await readOwner(path);
-  if (!after || after.ownerEpoch !== owner.ownerEpoch) throw new Error("lease ownership changed during renewal");
-  return renewed;
+  return withLeasePathLock(path, async () => {
+    const preDisk = await readLeaseDiskSnapshot(path);
+    if (!preDisk.parsedOwner || preDisk.parsedOwner.ownerEpoch !== owner.ownerEpoch) {
+      const message = describeDiskMismatch(owner, preDisk, "lease ownership changed");
+      throw new LeaseRenewalError(message, {
+        failedAt: new Date(env.now()).toISOString(),
+        stage: "precheck",
+        error: message,
+        leasePath: path,
+        expectedOwner: structuredClone(owner),
+        disk: preDisk,
+      });
+    }
+    const renewed = { ...owner, leaseUntil: new Date(env.now() + leaseMs).toISOString() };
+    const payload = Buffer.from(`${JSON.stringify(renewed)}\n`, "utf8");
+    // Write through the already-open lease inode at offset 0 BEFORE truncating to
+    // payload.length so the file is never 0 bytes on disk during renewal.
+    let handle;
+    try {
+      handle = await open(path, "r+");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const disk = await readLeaseDiskSnapshot(path);
+      const message = `lease ownership changed: open failed (${code ?? (error as Error).message})`;
+      throw new LeaseRenewalError(message, {
+        failedAt: new Date(env.now()).toISOString(),
+        stage: "open",
+        error: message,
+        code,
+        leasePath: path,
+        expectedOwner: structuredClone(owner),
+        disk,
+      });
+    }
+    try {
+      const info = await handle.stat();
+      const raw = await handle.readFile("utf8");
+      const verified = parseOwnerRecord(raw);
+      if (!verified || verified.ownerEpoch !== owner.ownerEpoch) {
+        const disk: LeaseDiskSnapshot = {
+          exists: true,
+          ino: info.ino,
+          size: info.size,
+          mtime: info.mtime.toISOString(),
+          raw: raw.slice(0, 1024),
+          parsedOwner: verified ?? null,
+        };
+        const message = describeDiskMismatch(owner, disk, "lease ownership changed");
+        throw new LeaseRenewalError(message, {
+          failedAt: new Date(env.now()).toISOString(),
+          stage: "verify",
+          error: message,
+          leasePath: path,
+          expectedOwner: structuredClone(owner),
+          disk,
+        });
+      }
+      try {
+        await handle.write(payload, 0, payload.length, 0);
+        await handle.truncate(payload.length);
+        await handle.sync();
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const message = `lease renewal write failed (${code ?? (error as Error).message})`;
+        throw new LeaseRenewalError(message, {
+          failedAt: new Date(env.now()).toISOString(),
+          stage: "write",
+          error: message,
+          code,
+          leasePath: path,
+          expectedOwner: structuredClone(owner),
+          disk: {
+            exists: true,
+            ino: info.ino,
+            size: info.size,
+            mtime: info.mtime.toISOString(),
+            raw: raw.slice(0, 1024),
+            parsedOwner: verified,
+          },
+        });
+      }
+    } finally { await handle.close(); }
+    const afterDisk = await readLeaseDiskSnapshot(path);
+    if (!afterDisk.parsedOwner || afterDisk.parsedOwner.ownerEpoch !== owner.ownerEpoch) {
+      const message = describeDiskMismatch(owner, afterDisk, "lease ownership changed during renewal");
+      throw new LeaseRenewalError(message, {
+        failedAt: new Date(env.now()).toISOString(),
+        stage: "postcheck",
+        error: message,
+        leasePath: path,
+        expectedOwner: structuredClone(owner),
+        disk: afterDisk,
+      });
+    }
+    return renewed;
+  });
 }
 
 export async function releaseLease(path: string, owner: OwnerRecord): Promise<boolean> {
-  const current = await readOwner(path);
-  if (!current || current.ownerEpoch !== owner.ownerEpoch) return false;
-  const archive = `${path}.release-${owner.ownerEpoch}`;
-  try { await rename(path, archive); }
-  catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
-  const moved = await readOwner(archive);
-  if (!moved || moved.ownerEpoch !== owner.ownerEpoch) {
-    // A different inode won the path race. Restore only if the lease path is free.
-    try { await rename(archive, path); } catch { /* preserve foreign archive */ }
-    return false;
-  }
-  await rm(archive, { force: true });
-  return true;
+  return withLeasePathLock(path, async () => {
+    const current = await readOwner(path);
+    if (!current || current.ownerEpoch !== owner.ownerEpoch) return false;
+    const archive = `${path}.release-${owner.ownerEpoch}`;
+    try { await rename(path, archive); }
+    catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
+    const moved = await readOwner(archive);
+    if (!moved || moved.ownerEpoch !== owner.ownerEpoch) {
+      // A different inode won the path race. Restore only if the lease path is free.
+      try { await rename(archive, path); } catch { /* preserve foreign archive */ }
+      return false;
+    }
+    await rm(archive, { force: true });
+    return true;
+  });
 }
 
 export async function inspectLeaseFile(path: string, env = defaultLeaseEnvironment): Promise<"live" | "stale" | "corrupt" | "missing"> {

@@ -52,6 +52,7 @@ function snapshotFromEvent(event: WatcherStateEvent): WatcherSnapshot | undefine
     config: event.config,
     owner: event.owner,
     reason: event.reason,
+    leaseFailure: event.leaseFailure,
   };
 }
 

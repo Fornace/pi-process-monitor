@@ -21,6 +21,8 @@ export function watcherMeta(watcher: RuntimeWatcher) {
     recoveryPolicy: watcher.config.recoveryPolicy,
     safetyClass: watcher.config.safetyClass,
     owner: watcher.owner,
+    reason: watcher.reason,
+    leaseFailure: watcher.leaseFailure,
     expiresAt: watcher.config.expiresAt,
     startedAt: new Date(watcher.createdAt).toISOString(),
     lastEventAt: watcher.lastEventAt ? new Date(watcher.lastEventAt).toISOString() : null,

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { notify } from "./message-ui.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { acquireLease, leasePath, leaseRoot, makeOwner, releaseLease, renewLease } from "./leases.ts";
+import { acquireLease, captureLeaseFailure, leasePath, leaseRoot, makeOwner, releaseLease, renewLease } from "./leases.ts";
 import { classifyPoll, defaultRecoveryPolicy, modeFor, newLogicalId, shortHandle, sourceFingerprint } from "./identity.ts";
 import { evaluateFuse, recordCleanShutdown, recordRuntimeStart, type FuseDecision } from "./recovery.ts";
 import { createCheckpoint, nextEvent, reduceState } from "./state.ts";
@@ -10,7 +10,7 @@ import { startPollRuntime } from "./poll.ts";
 import { startSpawnRuntime } from "./spawn.ts";
 import { compileMatchers, createCoalescer, probeCommand } from "./util.ts";
 import {
-  STATE_CUSTOM_TYPE, type LifecycleState, type ReducedState, type RuntimeWatcher,
+  STATE_CUSTOM_TYPE, type LifecycleState, type OwnerRecord, type ReducedState, type RuntimeWatcher,
   type SessionEntryLike, type WatcherConfig, type WatcherSnapshot, type WatcherStateEvent,
 } from "./types.ts";
 
@@ -67,18 +67,21 @@ export class MonitorRuntime {
         logicalId: event.logicalId, revision: event.revision, state: event.event,
         mode: event.mode, sourceFingerprint: event.sourceFingerprint,
         createdAt: event.createdAt, updatedAt: event.updatedAt, expiresAt: event.expiresAt,
-        recoveryPolicy: event.recoveryPolicy, config: event.config, owner: event.owner, reason: event.reason,
+        recoveryPolicy: event.recoveryPolicy, config: event.config, owner: event.owner,
+        reason: event.reason, leaseFailure: event.leaseFailure,
       });
     }
   }
 
   private transition(watcher: RuntimeWatcher, state: LifecycleState, reason?: string): void {
     const previous = this.snapshots.get(watcher.logicalId);
+    if (reason !== undefined) watcher.reason = reason;
     const event = nextEvent(previous, {
       logicalId: watcher.logicalId, event: state, mode: watcher.mode,
       sourceFingerprint: watcher.sourceFingerprint, owner: watcher.owner,
       updatedAt: new Date().toISOString(), expiresAt: watcher.config.expiresAt,
-      recoveryPolicy: watcher.config.recoveryPolicy, config: watcher.config, reason,
+      recoveryPolicy: watcher.config.recoveryPolicy, config: watcher.config,
+      reason: reason ?? watcher.reason, leaseFailure: watcher.leaseFailure,
     });
     watcher.revision = event.revision;
     watcher.state = state;
@@ -175,10 +178,10 @@ export class MonitorRuntime {
 
   private installQuarantinedStop(watcher: RuntimeWatcher): void {
     let stopped = false;
-    watcher.stop = async (intent = "stop") => {
+    watcher.stop = async (intent = "stop", reason?: string) => {
       if (stopped) return;
       stopped = true;
-      this.transition(watcher, intent === "expire" ? "expired" : "stopped", intent === "stop" ? "quarantine rejected" : undefined);
+      this.transition(watcher, intent === "expire" ? "expired" : "stopped", reason ?? (intent === "stop" ? "quarantine rejected" : undefined));
       this.watchers.delete(watcher.logicalId);
     };
   }
@@ -191,6 +194,10 @@ export class MonitorRuntime {
       lastEventAt: null, lastTickAt: null, eventCount: 0, consecutiveFailures: 0, receipts: [],
       stop: async () => {},
     };
+  }
+
+  private stopLeaseHeartbeat(watcher: RuntimeWatcher): void {
+    (watcher as RuntimeWatcher & { stopHeartbeat?: () => void }).stopHeartbeat?.();
   }
 
   private async releaseClaim(watcher: RuntimeWatcher): Promise<void> {
@@ -208,19 +215,42 @@ export class MonitorRuntime {
     }
     watcher.owner = owner;
     this.transition(watcher, "claimed", claim.staleArchived ? "reclaimed stale lease" : undefined);
+    let released = false;
+    let renewInFlight: Promise<OwnerRecord> | undefined;
+    const stopHeartbeat = () => {
+      released = true;
+      clearInterval(leaseHeartbeat);
+    };
     const leaseHeartbeat = setInterval(() => {
-      if (!watcher.owner) return;
-      void renewLease(path, watcher.owner).then((renewed) => { watcher.owner = renewed; }).catch(async () => {
-        await watcher.stop("quarantine");
+      if (released || renewInFlight || !watcher.owner) return;
+      const currentOwner = watcher.owner;
+      const renewal = renewLease(path, currentOwner);
+      renewInFlight = renewal;
+      void renewal.then((renewed) => {
+        if (renewInFlight === renewal) renewInFlight = undefined;
+        if (!released && watcher.owner?.ownerEpoch === currentOwner.ownerEpoch) {
+          watcher.owner = renewed;
+        }
+      }).catch(async (error) => {
+        if (renewInFlight === renewal) renewInFlight = undefined;
+        if (released) return;
+        stopHeartbeat();
+        // Capture renewal error and on-disk lease snapshot BEFORE stopping or releasing.
+        const leaseFailure = await captureLeaseFailure(path, currentOwner, error);
+        watcher.leaseFailure = leaseFailure;
+        watcher.reason = `lease renewal failed: ${leaseFailure.error}`;
+        await watcher.stop("quarantine", watcher.reason);
       });
     }, 15_000);
     leaseHeartbeat.unref?.();
     const release = async () => {
-      clearInterval(leaseHeartbeat);
+      stopHeartbeat();
+      try { await renewInFlight; } catch { /* handled by heartbeat or superseded by stop */ }
       if (watcher.owner) await releaseLease(path, watcher.owner);
       watcher.owner = undefined;
     };
-    (watcher as RuntimeWatcher & { releaseLease?: () => Promise<void> }).releaseLease = release;
+    (watcher as RuntimeWatcher & { stopHeartbeat?: () => void; releaseLease?: () => Promise<void> }).stopHeartbeat = stopHeartbeat;
+    (watcher as RuntimeWatcher & { stopHeartbeat?: () => void; releaseLease?: () => Promise<void> }).releaseLease = release;
     return true;
   }
 
@@ -241,7 +271,11 @@ export class MonitorRuntime {
       if (!command) throw new Error("poll watcher requires command or probe");
       const controller = startPollRuntime({ watcher, command, matcher, push: coalescer.push,
         onFailure: (message) => this.emit(watcher, message), ownedChildren: () => [...this.watchers.values()].filter((item) => item.child).length,
-        onCriticalPressure: (sample) => { this.emit(watcher, `HOST PRESSURE CRITICAL: ${sample.reasons.join(", ")}`); void watcher.stop("quarantine"); },
+        onCriticalPressure: (sample) => {
+          const reason = `host pressure critical: ${sample.reasons.join(", ")}`;
+          this.emit(watcher, `HOST PRESSURE CRITICAL: ${sample.reasons.join(", ")}`);
+          void watcher.stop("quarantine", reason);
+        },
       });
       resourceStop = controller.stop;
     } else {
@@ -269,16 +303,17 @@ export class MonitorRuntime {
       heartbeat = setInterval(() => this.emit(watcher, `heartbeat: still running (events=${watcher.eventCount})`), Math.max(1, watcher.config.heartbeatMinutes) * 60_000);
       heartbeat.unref?.();
     }
-    watcher.stop = async (intent = "stop") => {
+    watcher.stop = async (intent = "stop", reason?: string) => {
       if (stopped) return;
       stopped = true;
+      this.stopLeaseHeartbeat(watcher);
       if (expiry) clearTimeout(expiry);
       if (heartbeat) clearInterval(heartbeat);
       coalescer.cancel();
       await resourceStop();
       await this.releaseClaim(watcher);
       const state = intent === "release" ? "released" : intent === "expire" ? "expired" : intent === "quarantine" ? "quarantined" : "stopped";
-      if (!(this.shuttingDown && state === "released")) this.transition(watcher, state);
+      if (!(this.shuttingDown && state === "released")) this.transition(watcher, state, reason);
       else this.transition(watcher, "released", `session shutdown (${this.shutdownReason})`);
       if (state !== "quarantined") this.watchers.delete(watcher.logicalId);
     };
