@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { LeaseDiskSnapshot, LeaseFailureSnapshot, OwnerRecord } from "./types.ts";
@@ -211,37 +211,51 @@ async function archiveStale(path: string, now: number): Promise<string | undefin
   }
 }
 
+async function writeExclusiveLease(path: string, owner: OwnerRecord): Promise<void> {
+  const stage = `${path}.stage-${process.pid}-${randomUUID()}`;
+  const handle = await open(stage, "wx", 0o600);
+  try {
+    await handle.writeFile(`${JSON.stringify(owner)}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await link(stage, path);
+  } finally {
+    await unlink(stage).catch(() => {});
+  }
+}
+
 export async function acquireLease(
   path: string, owner: OwnerRecord, env = defaultLeaseEnvironment,
 ): Promise<LeaseClaim> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      const handle = await open(path, "wx", 0o600);
-      try { await handle.writeFile(`${JSON.stringify(owner)}\n`, "utf8"); await handle.sync(); }
-      finally { await handle.close(); }
-      return { acquired: true, owner, reason: "atomic lease acquired" };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const existing = await readOwner(path);
-      if (existing) {
-        const validation = validateOwner(existing, env);
-        if (validation.alive) return { acquired: false, existing, reason: validation.reason };
-      }
-      const archived = await archiveStale(path, env.now());
-      if (!archived) continue;
-      if (attempt === 3) return { acquired: false, existing, staleArchived: archived, reason: "stale lease race exhausted" };
+  return withLeasePathLock(path, async () => {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        const handle = await open(path, "wx", 0o600);
-        try { await handle.writeFile(`${JSON.stringify(owner)}\n`, "utf8"); await handle.sync(); }
-        finally { await handle.close(); }
-        return { acquired: true, owner, staleArchived: archived, reason: "stale lease reclaimed" };
-      } catch (retryError) {
-        if ((retryError as NodeJS.ErrnoException).code !== "EEXIST") throw retryError;
+        await writeExclusiveLease(path, owner);
+        return { acquired: true, owner, reason: "atomic lease acquired" };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const existing = await readOwner(path);
+        if (existing) {
+          const validation = validateOwner(existing, env);
+          if (validation.alive) return { acquired: false, existing, reason: validation.reason };
+        }
+        const archived = await archiveStale(path, env.now());
+        if (!archived) continue;
+        if (attempt === 3) return { acquired: false, existing, staleArchived: archived, reason: "stale lease race exhausted" };
+        try {
+          await writeExclusiveLease(path, owner);
+          return { acquired: true, owner, staleArchived: archived, reason: "stale lease reclaimed" };
+        } catch (retryError) {
+          if ((retryError as NodeJS.ErrnoException).code !== "EEXIST") throw retryError;
+        }
       }
     }
-  }
-  return { acquired: false, reason: "lease race exhausted" };
+    return { acquired: false, reason: "lease race exhausted" };
+  });
 }
 
 function describeDiskMismatch(expected: OwnerRecord, disk: LeaseDiskSnapshot, prefix: string): string {

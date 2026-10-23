@@ -49,7 +49,8 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
     ],
     parameters: monitorParams,
     prepareArguments: prepareMonitorArguments,
-    async execute(_id, params: MonitorParams, _signal, _update, ctx) {
+    async execute(_id, params: MonitorParams, signal, _update, ctx) {
+      signal?.throwIfAborted();
       const runtime = currentRuntime();
       const { config, sourceType, ignoredSourceFields } = resolveMonitorInput(params, ctx.cwd);
       const result = await runtime.launch(config);
@@ -89,7 +90,8 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
 
   pi.registerTool({
     name: "monitor_kill", label: "Monitor kill", description: "Stop one logical watcher and only its verified extension-owned process group.",
-    parameters: Type.Object({ id: Type.String() }), async execute(_id, params) {
+    parameters: Type.Object({ id: Type.String() }), async execute(_id, params, signal) {
+      signal?.throwIfAborted();
       const runtime = currentRuntime();
       const watcher = runtime.find(params.id);
       if (watcher && !watcher.foreignOwner) await watcher.stop("stop");
@@ -101,7 +103,8 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
   pi.registerTool({
     name: "monitor_recover", label: "Monitor recover", description: "List, approve, or reject quarantined watchers. Approval is explicit and reversible.",
     parameters: Type.Object({ id: Type.Optional(Type.String()), action: Type.Optional(StringEnum(["list", "approve", "reject"] as const)) }),
-    async execute(_id, params) {
+    async execute(_id, params, signal) {
+      signal?.throwIfAborted();
       const runtime = currentRuntime();
       const quarantined = [...runtime.watchers.values()].filter((watcher) => watcher.state === "quarantined");
       if (!params.id || !params.action || params.action === "list") return { ...text(quarantined.length ? quarantined.map((watcher) => `${watcher.handleId} ${watcher.label} reason=${runtime.getSnapshots().find((item) => item.logicalId === watcher.logicalId)?.reason ?? "unknown"}`).join("\n") : "No quarantined watchers."), details: { watchers: quarantined.map(watcherMeta) } };
@@ -113,7 +116,8 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
 
   pi.registerTool({
     name: "monitor_gc", label: "Monitor GC", description: "Checkpoint logical state and clean stale external leases. Dry-run by default.",
-    parameters: Type.Object({ apply: Type.Optional(Type.Boolean({ default: false })) }), async execute(_id, params) {
+    parameters: Type.Object({ apply: Type.Optional(Type.Boolean({ default: false })) }), async execute(_id, params, signal) {
+      signal?.throwIfAborted();
       const runtime = currentRuntime();
       const plan = await planExternalGc(runtime.getStateRoot(), Boolean(params.apply));
       let removedDirectories = 0;
@@ -124,7 +128,8 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
 
   pi.registerTool({
     name: "monitor_kill_all", label: "Monitor kill all", description: "Stop all current-session extension-owned watchers. Requires confirm=true.",
-    parameters: Type.Object({ confirm: Type.Boolean() }), async execute(_id, params) {
+    parameters: Type.Object({ confirm: Type.Boolean() }), async execute(_id, params, signal) {
+      signal?.throwIfAborted();
       const runtime = currentRuntime();
       if (!params.confirm) throw new Error("monitor_kill_all requires confirm=true");
       const list = [...runtime.watchers.values()].filter((watcher) => !watcher.foreignOwner);
