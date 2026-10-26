@@ -115,6 +115,12 @@ Raw local shell polls that contain workload executables/verbs, redirection, or b
 | `monitor_gc` | dry-run/apply checkpoint and external lease cleanup |
 | `monitor_kill_all { confirm: true }` | current-session owned groups only |
 
+All seven tools register inside the `fornace-monitor` namespace as optional
+tools. A session carries one family line and their names; the full declaration
+and agent guidance appear once a load (native `tool_search`, codemode
+`searchTools()`, or `tool_load`) names them. Explicit selection such as
+`--tools monitor` declares the tool directly.
+
 ## Commands
 
 ```bash

@@ -1,12 +1,21 @@
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolNamespace } from "@earendil-works/pi-coding-agent";
 import { applyEmptyDirectoryGc, planExternalGc } from "./gc.ts";
 import { monitorParams, prepareMonitorArguments, resolveMonitorInput, type MonitorParams } from "./input.ts";
 import type { MonitorRuntime } from "./runtime.ts";
 import type { RuntimeWatcher } from "./types.ts";
 
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
+
+/**
+ * Optional tool exposure: every monitor tool keeps its exact name, schema,
+ * executor and process ownership, but is registered undeclared until a load
+ * names it. One Fornace namespace groups the family for the parent index and
+ * native search; prompt snippets and guidelines appear with the tool once it is
+ * loaded.
+ */
+const MONITOR_NAMESPACE: ToolNamespace = { name: "fornace-monitor", description: "Non-blocking background watchers" };
 
 export function watcherMeta(watcher: RuntimeWatcher) {
   // Results enter append-only session history. Polls and process cleanup mutate
@@ -39,6 +48,7 @@ export function watcherMeta(watcher: RuntimeWatcher) {
 export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRuntime): void {
   pi.registerTool({
     name: "monitor", label: "Monitor",
+    exposure: "deferred", namespace: MONITOR_NAMESPACE,
     description: "Start or exactly reuse one non-blocking watcher. Select an explicit source.type: spawn, poll, tail, process, file, ssh, or http. source.type is authoritative; unrelated generated fields are ignored. Local shell polls are quarantined unless explicitly acknowledged as observers.",
     promptSnippet: "Watch an owned process or independent durable job without blocking",
     promptGuidelines: [
@@ -46,6 +56,7 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
       "Use source.type=spawn for a local workload. Use source.type=poll only for a fast read-only shell observation; use process/file/ssh/http for structured observers.",
       "Call monitor_status before creating a watcher or use options.reuse=return-existing; never duplicate a workload with blocking bash retries.",
       "Use narrow PID, run, workflow, exact path, or remote job identity; set options.expiresAt for temporary watchers.",
+      "Load monitor_status, monitor_inspect, monitor_kill, monitor_recover, monitor_gc, and monitor_kill_all by name when the task needs them.",
     ],
     parameters: monitorParams,
     prepareArguments: prepareMonitorArguments,
@@ -68,7 +79,7 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
   });
 
   pi.registerTool({
-    name: "monitor_status", label: "Monitor status", description: "List logical watchers, lifecycle, owner, recovery, expiry, tick, and failure status.",
+    name: "monitor_status", label: "Monitor status", exposure: "deferred", namespace: MONITOR_NAMESPACE, description: "List logical watchers, lifecycle, owner, recovery, expiry, tick, and failure status.",
     parameters: Type.Object({}), async execute() {
       const runtime = currentRuntime();
       const watchers = [...runtime.watchers.values()].map(watcherMeta);
@@ -79,7 +90,7 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
   });
 
   pi.registerTool({
-    name: "monitor_inspect", label: "Monitor inspect", description: "Inspect logical identity, lease owner, recovery configuration, and owned process receipt.",
+    name: "monitor_inspect", label: "Monitor inspect", exposure: "deferred", namespace: MONITOR_NAMESPACE, description: "Inspect logical identity, lease owner, recovery configuration, and owned process receipt.",
     parameters: Type.Object({ id: Type.String() }), async execute(_id, params) {
       const runtime = currentRuntime();
       const watcher = runtime.find(params.id);
@@ -89,7 +100,7 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
   });
 
   pi.registerTool({
-    name: "monitor_kill", label: "Monitor kill", description: "Stop one logical watcher and only its verified extension-owned process group.",
+    name: "monitor_kill", label: "Monitor kill", exposure: "deferred", namespace: MONITOR_NAMESPACE, description: "Stop one logical watcher and only its verified extension-owned process group.",
     parameters: Type.Object({ id: Type.String() }), async execute(_id, params, signal) {
       signal?.throwIfAborted();
       const runtime = currentRuntime();
@@ -101,7 +112,7 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
   });
 
   pi.registerTool({
-    name: "monitor_recover", label: "Monitor recover", description: "List, approve, or reject quarantined watchers. Approval is explicit and reversible.",
+    name: "monitor_recover", label: "Monitor recover", exposure: "deferred", namespace: MONITOR_NAMESPACE, description: "List, approve, or reject quarantined watchers. Approval is explicit and reversible.",
     parameters: Type.Object({ id: Type.Optional(Type.String()), action: Type.Optional(StringEnum(["list", "approve", "reject"] as const)) }),
     async execute(_id, params, signal) {
       signal?.throwIfAborted();
@@ -115,7 +126,7 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
   });
 
   pi.registerTool({
-    name: "monitor_gc", label: "Monitor GC", description: "Checkpoint logical state and clean stale external leases. Dry-run by default.",
+    name: "monitor_gc", label: "Monitor GC", exposure: "deferred", namespace: MONITOR_NAMESPACE, description: "Checkpoint logical state and clean stale external leases. Dry-run by default.",
     parameters: Type.Object({ apply: Type.Optional(Type.Boolean({ default: false })) }), async execute(_id, params, signal) {
       signal?.throwIfAborted();
       const runtime = currentRuntime();
@@ -127,7 +138,7 @@ export function registerTools(pi: ExtensionAPI, currentRuntime: () => MonitorRun
   });
 
   pi.registerTool({
-    name: "monitor_kill_all", label: "Monitor kill all", description: "Stop all current-session extension-owned watchers. Requires confirm=true.",
+    name: "monitor_kill_all", label: "Monitor kill all", exposure: "deferred", namespace: MONITOR_NAMESPACE, description: "Stop all current-session extension-owned watchers. Requires confirm=true.",
     parameters: Type.Object({ confirm: Type.Boolean() }), async execute(_id, params, signal) {
       signal?.throwIfAborted();
       const runtime = currentRuntime();

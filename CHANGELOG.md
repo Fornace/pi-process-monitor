@@ -2,6 +2,12 @@
 
 All notable changes to `pi-process-monitor` are documented here.
 
+## Unreleased
+
+### Changed
+
+- Register the seven monitor tools as deferred tools in the `fornace-monitor` namespace. Names, parameter schemas, executors, process ownership and permissions are unchanged; a session carries one family line and gets the full declarations and agent guidance when a load names the tools, while explicit selection (`--tools monitor`) still declares them.
+
 ## [2.0.6] - 2026-10-21
 
 ### Fixed
