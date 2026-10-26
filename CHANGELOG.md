@@ -2,7 +2,7 @@
 
 All notable changes to `pi-process-monitor` are documented here.
 
-## Unreleased
+## 2.0.8 (2026-10-26)
 
 ### Changed
 
