@@ -40,7 +40,7 @@ export class MonitorRuntime {
 
   /** Keep owned resources, never the invalidated extension API, across reload. */
   async pauseForReload(): Promise<void> {
-    await this.checkpoint();
+    if (this.stateEvents > 0) await this.checkpoint();
     this.pi = undefined;
   }
 
@@ -365,7 +365,10 @@ export class MonitorRuntime {
     this.shuttingDown = true;
     await Promise.all([...this.watchers.values()].map((watcher) => watcher.stop("release")));
     this.watchers.clear();
-    await this.checkpoint();
+    // Opening and closing a session without changing monitor state must not
+    // append to its journal. Another Pi may still own that session in memory.
+    // Explicit GC can checkpoint unchanged history through checkpoint().
+    if (this.stateEvents > 0) await this.checkpoint();
     recordCleanShutdown(this.stateRoot, this.sessionId);
   }
 

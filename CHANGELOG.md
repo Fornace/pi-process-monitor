@@ -2,6 +2,12 @@
 
 All notable changes to `pi-process-monitor` are documented here.
 
+## 2.0.10 (2026-10-29)
+
+### Changed
+
+- Automatic reload and shutdown checkpoints now require changed watcher state. Opening and closing an unchanged session preserves its journal. Explicit monitor GC continues to create a checkpoint on request.
+
 ## 2.0.8 (2026-10-26)
 
 ### Changed
