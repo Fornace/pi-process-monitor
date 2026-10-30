@@ -131,7 +131,9 @@ function applyCheckpoint(result: ReducedState, event: WatcherStateEvent, entryId
       result.malformed++;
       continue;
     }
-    result.watchers.set(snapshot.logicalId, snapshot);
+    // Recovery can change a watcher's policy. Keep the journal entry immutable
+    // even when a checkpoint contains nested configuration or ownership data.
+    result.watchers.set(snapshot.logicalId, structuredClone(snapshot));
   }
   result.checkpointEntryId = entryId;
 }
