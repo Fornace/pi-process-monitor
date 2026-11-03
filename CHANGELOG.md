@@ -2,6 +2,13 @@
 
 All notable changes to `pi-process-monitor` are documented here.
 
+## 2.0.13 (2026-11-03)
+
+### Fixed
+
+- Compare complete successful poll snapshots across output chunks and restarts.
+- Hand poll notices to the session before persisting their checkpoints; retain the previous checkpoint if notification admission fails during reload.
+
 ## 2.0.10 (2026-10-29)
 
 ### Changed
