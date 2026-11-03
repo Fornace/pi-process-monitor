@@ -98,6 +98,12 @@ export class MonitorRuntime {
     this.send(watcher, body);
   }
 
+  private emitPoll(watcher: RuntimeWatcher, body: string): void {
+    // The reload buffer is in memory; do not checkpoint an undelivered poll.
+    if (!this.pi || this.shuttingDown) throw new Error("monitor reload or shutdown in progress; poll notification not admitted");
+    this.emit(watcher, body);
+  }
+
   private send(watcher: RuntimeWatcher, body: string): void {
     if (!this.pi) throw new Error("Monitor notification has no current extension binding");
     this.pi.sendMessage(
@@ -270,7 +276,8 @@ export class MonitorRuntime {
     } else if (watcher.mode === "poll") {
       if (!command) throw new Error("poll watcher requires command or probe");
       const checkpointPath = `${leasePath(this.stateRoot, this.sessionId, watcher.logicalId)}.poll.json`;
-      const controller = startPollRuntime({ watcher, command, matcher, push: coalescer.push, flush: coalescer.flush, checkpointPath,
+      const pollCoalescer = createCoalescer((body) => this.emitPoll(watcher, body), watcher.config.coalesceSeconds, watcher.config.maxLines);
+      const controller = startPollRuntime({ watcher, command, matcher, push: pollCoalescer.push, flush: pollCoalescer.flush, checkpointPath,
         onFailure: (message) => this.emit(watcher, message), ownedChildren: () => [...this.watchers.values()].filter((item) => item.child).length,
         onCriticalPressure: (sample) => {
           const reason = `host pressure critical: ${sample.reasons.join(", ")}`;
@@ -278,7 +285,7 @@ export class MonitorRuntime {
           void watcher.stop("quarantine", reason);
         },
       });
-      resourceStop = controller.stop;
+      resourceStop = async () => { pollCoalescer.cancel(); await controller.stop(); };
     } else {
       const controller = startFileRuntime({ watcher, matcher, push: coalescer.push, onFailure: (message) => this.emit(watcher, message) });
       resourceStop = controller.stop;
