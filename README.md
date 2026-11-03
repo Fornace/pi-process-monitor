@@ -15,7 +15,7 @@ Notices use official Pi TUI components through a bundled shared module. They ren
 - **One local owner:** atomic leases prevent two Pi processes from running the same logical watcher.
 - **Conservative recovery:** files and classified remote probes auto-resume; local shell polls require confirmation.
 - **Bounded execution:** poll ticks never overlap and have timeout, output caps, exponential backoff, jitter, failure suspension, and owned process-group cleanup.
-- **Poll notifications:** matching complete lines are compared with the previous successful tick, across stdout chunks and restarts. A failed or truncated tick does not advance the checkpoint; an initial tick reports its current matching lines. Messages are queued before the checkpoint and might be repeated after a crash or delivery failure. Recovery preserves the previous snapshot, not a history of lines that later disappeared.
+- **Poll notifications:** matching complete lines are compared with the previous successful tick, across stdout chunks and restarts. A failed or truncated tick does not advance the checkpoint; an initial tick reports its current matching lines. Notices are handed to Pi before the checkpoint and might repeat after a crash or delivery failure. Recovery preserves the previous snapshot, not a history of lines that later disappeared.
 - **Inspectable:** status/inspect report owner epoch, PID/PGID, command hash, process start, exit, signals, and truncation receipts.
 - **Crash-loop fuse:** repeated abnormal starts quarantine local recovery instead of replaying it.
 

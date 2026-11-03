@@ -12,6 +12,7 @@ export interface PollRuntimeOptions {
   command: string;
   matcher: (line: string) => boolean;
   push: (line: string) => void;
+  flush?: () => void;
   onFailure: (message: string) => void;
   onCriticalPressure: (sample: PressureSample) => void;
   ownedChildren: () => number;
@@ -190,7 +191,13 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
         if (stopped || timeoutOwned.has(started)) return;
         stdout.finish();
         stderr.finish();
-        for (const value of additions) options.push(value);
+        try {
+          for (const value of additions) options.push(value);
+          options.flush?.();
+        } catch (error) {
+          fail(`POLL NOTIFICATION ERROR: ${(error as Error).message}`);
+          return;
+        }
         // Retry a failed or incomplete observation against the prior snapshot.
         if (code === 0 && !started.receipt.stdoutTruncatedBytes && !started.receipt.stderrTruncatedBytes) {
           try { remember(current); }

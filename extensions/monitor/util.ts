@@ -1,5 +1,3 @@
-import { truncateTail } from "@earendil-works/pi-coding-agent";
-
 export const DEFAULT_NOTIFY = [
   "error", "fail", "failed", "oom", "out of memory", "killed", "traceback",
   "exception", "fatal", "abort", "panic", "segfault", "saved", "checkpoint",
@@ -32,9 +30,29 @@ export function createCoalescer(
     if (timer) clearTimeout(timer);
     timer = undefined;
     if (canceled || !lines.length) return;
-    const content = truncateTail(lines.join("\n"), { maxLines, maxBytes: 8000 }).content;
+    const pending = lines;
     lines = [];
-    emit(content);
+    const lineLimit = Math.max(1, maxLines);
+    let batch: string[] = [];
+    let bytes = 0;
+    const send = () => {
+      if (!batch.length) return;
+      emit(batch.join("\n"));
+      batch = [];
+      bytes = 0;
+    };
+    for (const line of pending) {
+      const size = Buffer.byteLength(line);
+      if (size > 8000) {
+        send();
+        emit(line);
+        continue;
+      }
+      if (batch.length >= lineLimit || bytes + (batch.length ? 1 : 0) + size > 8000) send();
+      bytes += (batch.length ? 1 : 0) + size;
+      batch.push(line);
+    }
+    send();
   };
   return {
     push: (line) => {
