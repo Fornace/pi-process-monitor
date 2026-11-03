@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { spawnOwned, stopOwned, type OwnedProcess } from "./process.ts";
 import { samplePressure, type PressureSample } from "./pressure.ts";
 import type { Clock, RuntimeWatcher } from "./types.ts";
@@ -12,6 +16,7 @@ export interface PollRuntimeOptions {
   onCriticalPressure: (sample: PressureSample) => void;
   ownedChildren: () => number;
   pressureSample?: (ownedChildren: number) => Promise<PressureSample>;
+  checkpointPath?: string;
   random?: () => number;
   clock?: Clock;
 }
@@ -39,6 +44,37 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
   const maxFailures = Math.max(1, watcher.config.maxConsecutiveFailures ?? 5);
   const maxBackoffMs = Math.max(intervalMs, (watcher.config.backoffMaxSeconds ?? 300) * 1000);
   const seen = new Set<string>();
+  if (options.checkpointPath) {
+    try {
+      const checkpoint = JSON.parse(readFileSync(options.checkpointPath, "utf8")) as {
+        version?: number; logicalId?: string; sourceFingerprint?: string; lines?: unknown;
+      };
+      if (checkpoint.version !== 1 || checkpoint.logicalId !== watcher.logicalId ||
+          checkpoint.sourceFingerprint !== watcher.sourceFingerprint || !Array.isArray(checkpoint.lines) ||
+          checkpoint.lines.some((value) => typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value))) {
+        throw new Error("invalid poll checkpoint identity or contents");
+      }
+      for (const value of checkpoint.lines) seen.add(value as string);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  const remember = (current: Set<string>) => {
+    if (options.checkpointPath) {
+      mkdirSync(dirname(options.checkpointPath), { recursive: true, mode: 0o700 });
+      const temp = `${options.checkpointPath}.${process.pid}.tmp`;
+      try {
+        writeFileSync(temp, `${JSON.stringify({ version: 1, logicalId: watcher.logicalId,
+          sourceFingerprint: watcher.sourceFingerprint, lines: [...current] })}\n`, { mode: 0o600 });
+        renameSync(temp, options.checkpointPath);
+      } catch (error) {
+        try { unlinkSync(temp); } catch { /* no temporary file remains */ }
+        throw error;
+      }
+    }
+    seen.clear();
+    for (const value of current) seen.add(value);
+  };
   let active: OwnedProcess | undefined;
   let tickPending = false;
   let timer: NodeJS.Timeout | undefined;
@@ -65,13 +101,6 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
     schedule(Math.min(maxBackoffMs, intervalMs * (2 ** watcher.consecutiveFailures)));
   };
 
-  const consume = (chunk: Buffer) => {
-    const lines = chunk.toString().split("\n").map((line) => line.trim()).filter(Boolean);
-    for (const line of lines) if (!seen.has(line) && options.matcher(line)) options.push(line);
-    seen.clear();
-    for (const line of lines) seen.add(line);
-  };
-
   const tick = async () => {
     if (stopped || active || tickPending) return;
     tickPending = true;
@@ -92,13 +121,43 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
       delayedNotice = false;
       watcher.lastTickAt = clock.now();
       try {
+      const current = new Set<string>();
+      // Deliver after the full poll, so chunk boundaries cannot split an event.
+      const additions: string[] = [];
+      const line = (value: string) => {
+        const trimmed = value.trim();
+        if (!trimmed || !options.matcher(trimmed)) return;
+        const digest = createHash("sha256").update(trimmed).digest("hex");
+        if (current.has(digest)) return;
+        current.add(digest);
+        if (!seen.has(digest)) additions.push(trimmed);
+      };
+      const makeConsumer = () => {
+        const decoder = new StringDecoder("utf8");
+        let pending = "";
+        return {
+          consume(chunk: Buffer) {
+            pending += decoder.write(chunk);
+            const lines = pending.split("\n");
+            pending = lines.pop() ?? "";
+            for (const value of lines) line(value);
+          },
+          finish() {
+            pending += decoder.end();
+            if (pending) line(pending);
+            pending = "";
+          },
+        };
+      };
+      const stdout = makeConsumer();
+      const stderr = makeConsumer();
       active = spawnOwned({
         logicalId: watcher.logicalId,
         ownerEpoch: watcher.owner?.ownerEpoch ?? "unowned",
         command: options.command,
         cwd: watcher.config.cwd,
-        onStdout: consume,
-        onStderr: consume,
+        onStdout: stdout.consume,
+        onStderr: stderr.consume,
       });
       watcher.child = active.child;
       watcher.receipt = active.receipt;
@@ -122,13 +181,27 @@ export function startPollRuntime(options: PollRuntimeOptions): PollController {
         watcher.child = undefined;
         if (!timeoutOwned.has(started)) fail(`POLL ERROR: ${error.message}`);
       });
-      started.child.once("exit", (code, signal) => {
+      // close fires after both pipes drain; exit can precede their final data.
+      started.child.once("close", (code, signal) => {
         if (timeout) clock.clearTimeout(timeout);
         timeout = undefined;
         if (active === started) active = undefined;
         watcher.child = undefined;
         if (stopped || timeoutOwned.has(started)) return;
-        if (code === 0) {
+        stdout.finish();
+        stderr.finish();
+        for (const value of additions) options.push(value);
+        // Retry a failed or incomplete observation against the prior snapshot.
+        if (code === 0 && !started.receipt.stdoutTruncatedBytes && !started.receipt.stderrTruncatedBytes) {
+          try { remember(current); }
+          catch (error) {
+            fail(`POLL CHECKPOINT ERROR: ${(error as Error).message}`);
+            return;
+          }
+        }
+        if (code === 0 && (started.receipt.stdoutTruncatedBytes || started.receipt.stderrTruncatedBytes)) {
+          fail(`POLL OUTPUT TRUNCATED stdout=${started.receipt.stdoutTruncatedBytes} stderr=${started.receipt.stderrTruncatedBytes}`);
+        } else if (code === 0) {
           watcher.consecutiveFailures = 0;
           schedule(intervalMs);
         } else fail(`POLL EXIT code=${code} signal=${signal ?? "none"}`);

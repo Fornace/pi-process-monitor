@@ -269,7 +269,8 @@ export class MonitorRuntime {
       resourceStop = controller.stop;
     } else if (watcher.mode === "poll") {
       if (!command) throw new Error("poll watcher requires command or probe");
-      const controller = startPollRuntime({ watcher, command, matcher, push: coalescer.push,
+      const checkpointPath = `${leasePath(this.stateRoot, this.sessionId, watcher.logicalId)}.poll.json`;
+      const controller = startPollRuntime({ watcher, command, matcher, push: coalescer.push, checkpointPath,
         onFailure: (message) => this.emit(watcher, message), ownedChildren: () => [...this.watchers.values()].filter((item) => item.child).length,
         onCriticalPressure: (sample) => {
           const reason = `host pressure critical: ${sample.reasons.join(", ")}`;
