@@ -10,6 +10,12 @@ tested_with: pi-process-monitor 2.0.2, @earendil-works/pi-coding-agent 0.80.2+
 
 Use monitor for owned background work or independent observation while the user keeps working. File and poll observers filter lines with `notifyOn`. In the current `startResources` implementation, spawn forwards every output line to its coalescer; `notifyOn` does not filter spawn output. For verbose jobs, redirect output to a durable log in the spawn command and attach a file observer with `notifyOn`. Spawn still reports process exit. Ordinary foreground commands need no watcher.
 
+`coalesceSeconds` is a quiet-time debounce: each pushed line resets the timer
+(`extensions/monitor/util.ts`, `createCoalescer`). Keep it short for live generation
+updates. A 45 to 60 second window can defer notifications until a busy stream stops,
+even though capture is working. Use `maxLines` to bound notification size rather
+than lengthening the debounce to reduce volume.
+
 ## Public input contract
 
 Use one required `source` object and select the mode with `source.type`:
