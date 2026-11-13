@@ -1,8 +1,11 @@
-# pi-process-monitor
+# pi-process-monitor (Consolidated)
+
+Status: Consolidated into `~/works/repos/pi-fornace`. Do not add new features here; make changes in `pi-fornace`.
 
 ## Homes
 
 | Content | Location |
 | --- | --- |
-| Code | `/Users/ffrappo/works/repos/pi-process-monitor` |
+| Historical code | `/Users/ffrappo/works/repos/pi-process-monitor` |
+| Active owner | `/Users/ffrappo/works/repos/pi-fornace` |
 | Git remote | `https://github.com/Fornace/pi-process-monitor.git` |
